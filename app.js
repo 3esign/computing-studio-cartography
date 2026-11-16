@@ -366,7 +366,7 @@
       lbl.textContent = t('gpsOk', STANJE.gps.tacnost_m);
     } else if (STANJE.gpsGreska) {
       dot.className = 'dot err';
-      lbl.textContent = t('gpsNema');
+      lbl.textContent = STANJE.gpsGreskaKod === 1 ? 'Lokacija odbijena · dodirni za uputstvo' : 'GPS nije očitan · dodirni ponovo';
     } else {
       dot.className = 'dot warn';
       lbl.textContent = t('gpsTrazi');
@@ -398,6 +398,10 @@
     const naGresku = err => {
       if (!STANJE.gps) {
         STANJE.gpsGreska = err && err.message ? err.message : 'GPS nedostupan';
+        STANJE.gpsGreskaKod = err && err.code;
+        if (err && err.code === 1 && STANJE.gpsRucno) {
+          alert('Pregledač je odbio lokaciju.\n\n1) Uključi Lokaciju u brzim podešavanjima telefona.\n2) Dodirni ikonicu levo od adrese (ili ⋮ → Podešavanja sajta) → Lokacija → Dozvoli.\n3) Podešavanja telefona → Aplikacije → ovaj pregledač → Dozvole → Lokacija → Dozvoli.\n4) Osveži stranicu. Ako i dalje ne radi, otvori link u Chrome-u.');
+        }
       }
       osveziGpsPrikaz();
     };
@@ -1368,7 +1372,12 @@
       if (STANJE.mapa) STANJE.mapa.zoomOut({ duration: 250 });
     };
 
-    document.getElementById('btn-gps-bar').onclick = () => pokreniGps(true);
+    document.getElementById('btn-gps-bar').onclick = () => {
+      STANJE.gpsRucno = true;
+      if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+      STANJE.gpsGreska = ''; osveziGpsPrikaz();
+      pokreniGps(true);
+    };
     document.getElementById('btn-open-composer').onclick = otvoriKompozitor;
     document.getElementById('btn-submit-login').onclick = izvrsiPrijavu;
 
