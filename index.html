@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="sr-Latn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f1d18">
+  <meta name="description" content="Urbani žurnal · Computing Studio — zajednički terenski dnevnik opažanja, memorije, sećanja i subjektivnog doživljaja urbane sredine.">
+  <title>Urbani žurnal · Computing Studio</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="app.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin="anonymous" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+    <!-- 1. GORNJA TRAKA -->
+    <header class="topbar" aria-label="Zaglavlje aplikacije">
+      <div class="brand-group">
+        <span class="brand-mark" aria-hidden="true">UŽ</span>
+        <div class="brand-titles">
+          <span class="brand-main" data-sr="Urbani žurnal" data-en="Urban Journal">Urbani žurnal</span>
+          <span class="brand-sub" data-sr="Computing Studio · Dnevnik grada" data-en="Computing Studio · City Diary">Computing Studio · Dnevnik grada</span>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <button type="button" class="pill-btn" id="btn-status" title="Status veze i reda slanja">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text" data-sr="Povezivanje" data-en="Connecting">Povezivanje</span>
+        </button>
+        <button type="button" class="pill-btn team-btn" id="btn-profil">
+          <span id="profil-label" data-sr="Prijava" data-en="Sign in">Prijava</span>
+        </button>
+        <button type="button" class="pill-btn icon-top-btn" id="btn-info" aria-label="O Urbanom žurnalu" title="O Urbanom žurnalu">?</button>
+        <button type="button" class="pill-btn icon-top-btn" id="btn-lang" aria-label="Promeni jezik / Switch language">EN</button>
+      </div>
+    </header>
+
+    <!-- 2. TRAKA POGLEDA, FILTERA I OTKRIVENOSTI -->
+    <nav class="subbar" aria-label="Prikaz i filteri">
+      <div class="seg-group" role="tablist">
+        <button type="button" class="seg-btn active" id="view-map-btn" role="tab" aria-selected="true">
+          <span data-sr="3D Mapa" data-en="3D Map">3D Mapa</span>
+        </button>
+        <button type="button" class="seg-btn" id="view-list-btn" role="tab" aria-selected="false">
+          <span data-sr="Dnevnik" data-en="Journal">Dnevnik</span> (<span id="count-entries">0</span>)
+        </button>
+      </div>
+
+      <div class="seg-group">
+        <button type="button" class="seg-btn active" id="filter-all-btn">
+          <span data-sr="Ceo grad" data-en="Whole city">Ceo grad</span>
+        </button>
+        <button type="button" class="seg-btn" id="filter-team-btn">
+          <span id="filter-team-label" data-sr="Naš tim" data-en="Our team">Naš tim</span>
+        </button>
+      </div>
+
+      <div class="metric-chip" id="metric-chip">
+        <span data-sr="Otkriveno:" data-en="Revealed:">Otkriveno:</span> <strong id="metric-m2">0 m²</strong>
+      </div>
+    </nav>
+
+    <!-- 3. SREDIŠNJI RADNI PROSTOR -->
+    <main class="stage" id="main-stage">
+      <!-- 3D Mapa -->
+      <section class="map-wrap" id="map-wrap" aria-label="Mapa urbanog žurnala">
+        <div id="map"></div>
+        <div class="map-fallback-banner" id="map-fallback" hidden>
+          <span data-sr="3D prikaz mape nije dostupan na ovom uređaju — koristi prikaz Dnevnik za čitanje i + Novi zapis za unos." data-en="3D map is unavailable on this device — use Journal view to read and + New entry to record.">3D prikaz mape nije dostupan na ovom uređaju — koristi prikaz Dnevnik za čitanje i + Novi zapis za unos.</span>
+        </div>
+        <div class="map-tools" aria-label="Kontrole mape">
+          <button type="button" class="map-tool-btn" id="btn-my-loc" title="Moja lokacija" aria-label="Moja lokacija">⌖</button>
+          <button type="button" class="map-tool-btn active" id="btn-toggle-3d" title="3D nagib zgrada" aria-label="3D ili 2D nagib">3D</button>
+          <button type="button" class="map-tool-btn" id="btn-zoom-in" title="Uvećaj" aria-label="Uvećaj">+</button>
+          <button type="button" class="map-tool-btn" id="btn-zoom-out" title="Umanji" aria-label="Umanji">−</button>
+        </div>
+      </section>
+
+      <!-- Lista dnevnika -->
+      <section class="list-wrap" id="list-wrap" aria-label="Hronološki urbani dnevnik" hidden>
+        <div class="list-inner">
+          <article class="journal-intro-card">
+            <h2 data-sr="Urbani žurnal · Subjektivni doživljaj grada" data-en="Urban Journal · Subjective Experience of the City">Urbani žurnal · Subjektivni doživljaj grada</h2>
+            <p data-sr="Grad ne čine samo ulice i zgrade, već način na koji ih opažamo, pamtimo i doživljavamo. Ovde se sabiraju terenska zapažanja, sećanja, prizori, zvukovi i mikro-prostori svih timova u jednu živu mapu Beograda." data-en="A city is shaped not only by streets and buildings, but by how we perceive, remember, and experience them. Field observations, memories, scenes, sounds, and micro-spaces from all teams converge here into a living map of Belgrade.">Grad ne čine samo ulice i zgrade, već način na koji ih opažamo, pamtimo i doživljavamo. Ovde se sabiraju terenska zapažanja, sećanja, prizori, zvukovi i mikro-prostori svih timova u jednu živu mapu Beograda.</p>
+          </article>
+          <div id="journal-feed"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 4. DONJA AKCIONA TRAKA -->
+    <footer class="actionbar" aria-label="Unos u žurnal">
+      <button type="button" class="gps-status" id="btn-gps-bar" title="Dodirni za osvežavanje GPS lokacije">
+        <span class="dot warn" id="gps-dot"></span>
+        <span class="gps-label" id="gps-label" data-sr="Tražim GPS lokaciju…" data-en="Acquiring GPS…">Tražim GPS lokaciju…</span>
+      </button>
+      <button type="button" class="btn-new-entry" id="btn-open-composer">
+        <span aria-hidden="true">＋</span>
+        <span data-sr="Novi zapis" data-en="New entry">Novi zapis</span>
+      </button>
+    </footer>
+  </div>
+
+  <!-- ========================================================================
+       JEDINSTVENI MODALNI SISTEM (uvek najviše 1 otvoren panel, nula sudara)
+       ======================================================================== -->
+
+  <!-- PANEL 1: PRIJAVA TIMA (QR ILI RUČNO) + LIČNI POTPIS STUDENTA -->
+  <div class="sheet-backdrop" id="modal-login" role="dialog" aria-modal="true" aria-labelledby="login-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="login-title" data-sr="Urbani žurnal · Prijava u tim" data-en="Urban Journal · Team Sign-in">Urbani žurnal · Prijava u tim</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="alert-box info">
+          <strong data-sr="Urbani dnevnik opažanja i memorije grada." data-en="Urban diary of perception and city memory.">Urbani dnevnik opažanja i memorije grada.</strong>
+          <span data-sr="Dokumentujemo subjektivni doživljaj urbane sredine — zapažanja, atmosferu, sećanja, prizore i zvukove prostora kroz koje prolazimo." data-en="We document the subjective experience of the urban environment — observations, atmosphere, memories, scenes, and sounds of the spaces we move through.">Dokumentujemo subjektivni doživljaj urbane sredine — zapažanja, atmosferu, sećanja, prizore i zvukove prostora kroz koje prolazimo.</span>
+        </div>
+
+        <!-- Upozorenje za privremeni in-app pregledač (Viber/Instagram/Skener) -->
+        <div class="alert-box warn" id="inapp-warning" hidden>
+          <strong data-sr="Pažnja: link je otvoren u privremenom pregledaču aplikacije!" data-en="Warning: opened inside an in-app browser!">Pažnja: link je otvoren u privremenom pregledaču aplikacije!</strong><br>
+          <span data-sr="Da ne bi zauzeo dva mesta u timu i izgubio prijavu, kopiraj link i otvori ga u glavnom pregledaču (Safari ili Chrome)." data-en="To avoid taking two seats in your team, copy the link and open it in Safari or Chrome.">Da ne bi zauzeo dva mesta u timu i izgubio prijavu, kopiraj link i otvori ga u glavnom pregledaču (Safari ili Chrome).</span>
+          <div style="margin-top:8px">
+            <button type="button" class="btn-secondary" id="btn-copy-qr-link" style="width:100%" data-sr="Kopiraj link za Safari / Chrome" data-en="Copy link for Safari / Chrome">Kopiraj link za Safari / Chrome</button>
+          </div>
+        </div>
+
+        <div class="alert-box ok" id="qr-detected-box" hidden></div>
+        <div class="alert-box err" id="login-error-box" hidden></div>
+
+        <div id="manual-code-fields">
+          <div class="field" style="margin-bottom:10px">
+            <label for="inp-tim" data-sr="Oznaka tima" data-en="Team ID">Oznaka tima</label>
+            <input class="input" id="inp-tim" type="text" placeholder="npr. T07" autocomplete="off" autocapitalize="characters">
+          </div>
+          <div class="field">
+            <label for="inp-kod" data-sr="Tajni kod tima (sa QR koda kod profesora)" data-en="Team secret code (from QR)">Tajni kod tima (sa QR koda kod profesora)</label>
+            <input class="input" id="inp-kod" type="text" placeholder="10 znakova sa QR koda" autocomplete="off" autocapitalize="characters">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="inp-nadimak" data-sr="Tvoje ime ili nadimak (lični potpis u okviru tima)" data-en="Your name or nickname (personal signature within team)">Tvoje ime ili nadimak (lični potpis u okviru tima)</label>
+          <input class="input" id="inp-nadimak" type="text" maxlength="32" placeholder="npr. Ana, Marko..." autocomplete="given-name">
+          <span class="hint" data-sr="Svi članovi tima koriste isti QR kod sa svojih telefona, a tvoje ime potpisuje tvoja zapažanja." data-en="All team members scan the same team QR on their own phones; your name signs your entries.">Svi članovi tima koriste isti QR kod sa svojih telefona, a tvoje ime potpisuje tvoja zapažanja.</span>
+        </div>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-primary" id="btn-submit-login" data-sr="Uđi u Urbani žurnal →" data-en="Enter Urban Journal →">Uđi u Urbani žurnal →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL 2: O URBANOM ŽURNALU (KONCEPT I UPUTSTVO) -->
+  <div class="sheet-backdrop" id="modal-info" role="dialog" aria-modal="true" aria-labelledby="info-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="info-title" data-sr="Šta je Urbani žurnal?" data-en="What is the Urban Journal?">Šta je Urbani žurnal?</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p style="margin:0;font-size:14px;line-height:1.55" data-sr="Urbani žurnal je kolektivni eksperiment predmeta Computing Studio (Osnove računarstva). Umesto posmatranja grada samo kao skupa parcela i objekata, istražujemo subjektivni doživljaj urbane sredine: opažanje, zapažanje, memoriju, lično i kolektivno sećanje u prostoru." data-en="Urban Journal is a collective Computing Studio experiment. Beyond viewing the city merely as plots and buildings, we explore the subjective experience of the urban environment: perception, observation, memory, and personal or shared remembrance in space.">
+          Urbani žurnal je kolektivni eksperiment predmeta Computing Studio (Osnove računarstva). Umesto posmatranja grada samo kao skupa parcela i objekata, istražujemo subjektivni doživljaj urbane sredine: opažanje, zapažanje, memoriju, lično i kolektivno sećanje u prostoru.
+        </p>
+
+        <div class="alert-box info">
+          <strong data-sr="Nedelja 1 · Slobodno opažanje" data-en="Week 1 · Open Observation">Nedelja 1 · Slobodno opažanje</strong><br>
+          <span data-sr="Nema obaveznih rubrika ni ručnog nišanjenja na mapi. Kreći se kroz grad, zastani tamo gde prostor izazove pažnju ili sećanje i zabeleži trenutak." data-en="No mandatory form fields and no manual map aiming. Walk through the city, pause where space sparks attention or memory, and record the moment.">Nema obaveznih rubrika ni ručnog nišanjenja na mapi. Kreći se kroz grad, zastani tamo gde prostor izazove pažnju ili sećanje i zabeleži trenutak.</span>
+        </div>
+
+        <ol class="steps-list">
+          <li data-sr="Skeniraj QR kod svog tima kod profesora u glavnom pregledaču (Safari / Chrome) i upiši ime ili nadimak." data-en="Scan your team QR code in Safari or Chrome and enter your name or nickname.">Skeniraj QR kod svog tima kod profesora u glavnom pregledaču (Safari / Chrome) i upiši ime ili nadimak.</li>
+          <li data-sr="Uključi lokaciju na telefonu — svaki zapis osvetljava krug iskustva na 3D mapi (5–25 m prema tačnosti GPS-a)." data-en="Allow phone location — every entry illuminates an experience circle on the 3D map (5–25 m by GPS accuracy).">Uključi lokaciju na telefonu — svaki zapis osvetljava krug iskustva na 3D mapi (5–25 m prema tačnosti GPS-a).</li>
+          <li data-sr="Dodirni + Novi zapis i unesi bar jedan trag: belešku, fotografiju, snimljen zvuk grada ili kratak video." data-en="Tap + New entry and add at least one trace: a note, photo, recorded city sound, or short video.">Dodirni + Novi zapis i unesi bar jedan trag: belešku, fotografiju, snimljen zvuk grada ili kratak video.</li>
+          <li data-sr="Ako nemaš signal ili je PC privremeno nedostupan, zapis ostaje sačuvan u telefonu i sam se šalje čim se veza vrati." data-en="If offline or the server is temporarily unreachable, your entry is safely stored on your phone and syncs automatically.">Ako nemaš signal ili je PC privremeno nedostupan, zapis ostaje sačuvan u telefonu i sam se šalje čim se veza vrati.</li>
+        </ol>
+
+        <div style="padding-top:4px;font-size:12.5px;color:var(--ink-soft)">
+          <a href="https://3esign.github.io/computing-studio/" target="_blank" rel="noopener" style="color:var(--accent-dark);font-weight:700" data-sr="← Nazad na glavni sajt Computing Studio" data-en="← Back to Computing Studio main site">← Nazad na glavni sajt Computing Studio</a>
+        </div>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-primary" data-close-modal data-sr="Razumem, nastavi" data-en="Got it, continue">Razumem, nastavi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL 3: NOVI ZAPIS U URBANOM ŽURNALU -->
+  <div class="sheet-backdrop" id="modal-composer" role="dialog" aria-modal="true" aria-labelledby="comp-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="comp-title" data-sr="Novi zapis u žurnalu" data-en="New Journal Entry">Novi zapis u žurnalu</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="meta-strip" id="comp-meta-strip"></div>
+        <div class="alert-box err" id="comp-error" hidden></div>
+
+        <div class="field">
+          <label data-sr="Sloj doživljaja (opciono, možeš izabrati više)" data-en="Experience layer (optional, select any)">Sloj doživljaja (opciono, možeš izabrati više)</label>
+          <div class="chip-grid" id="comp-tags">
+            <button type="button" class="choice-chip" data-tag="Opažanje" data-sr="Opažanje" data-en="Perception">Opažanje</button>
+            <button type="button" class="choice-chip" data-tag="Memorija i sećanje" data-sr="Memorija i sećanje" data-en="Memory & recall">Memorija i sećanje</button>
+            <button type="button" class="choice-chip" data-tag="Atmosfera i čula" data-sr="Atmosfera i čula" data-en="Atmosphere & senses">Atmosfera i čula</button>
+            <button type="button" class="choice-chip" data-tag="Kretanje i ritam" data-sr="Kretanje i ritam" data-en="Movement & rhythm">Kretanje i ritam</button>
+            <button type="button" class="choice-chip" data-tag="Prostorni detalj" data-sr="Prostorni detalj" data-en="Spatial detail">Prostorni detalj</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="comp-text" data-sr="Zapažanje, misao ili sećanje sa ovog mesta" data-en="Observation, thought, or memory from this place">Zapažanje, misao ili sećanje sa ovog mesta</label>
+          <textarea class="textarea" id="comp-text" maxlength="2000" placeholder="Šta primećuješ u prostoru? Kakav utisak, zvuk, detalj ili sećanje nosi ovo mesto?"></textarea>
+        </div>
+
+        <div class="field">
+          <label data-sr="Dodaj medijski trag (foto, zvuk grada ili kratak video)" data-en="Add media trace (photo, city sound, or short video)">Dodaj medijski trag (foto, zvuk grada ili kratak video)</label>
+          <div class="media-picker-row">
+            <label class="media-btn" for="inp-file-photo">
+              <span aria-hidden="true">📷</span>
+              <span data-sr="Fotografija" data-en="Photo">Fotografija</span>
+            </label>
+            <button type="button" class="media-btn" id="btn-record-audio">
+              <span aria-hidden="true" id="rec-icon">🎙️</span>
+              <span id="rec-label" data-sr="Snimi zvuk" data-en="Record sound">Snimi zvuk</span>
+            </button>
+            <label class="media-btn" for="inp-file-video">
+              <span aria-hidden="true">🎬</span>
+              <span data-sr="Video / Audio" data-en="Video / Audio">Video / Audio</span>
+            </label>
+          </div>
+          <input type="file" id="inp-file-photo" accept="image/*" multiple hidden>
+          <input type="file" id="inp-file-video" accept="video/*,audio/*" hidden>
+          <span class="hint" data-sr="Slike se automatski optimizuju na telefonu bez skrivenih EXIF podataka. Video do 60 s (50 MB)." data-en="Photos are automatically optimized on device with EXIF removed. Video up to 60 s (50 MB).">Slike se automatski optimizuju na telefonu bez skrivenih EXIF podataka. Video do 60 s (50 MB).</span>
+        </div>
+
+        <div class="attached-list" id="comp-attachments"></div>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-secondary" data-close-modal data-sr="Otkaži" data-en="Cancel">Otkaži</button>
+        <button type="button" class="btn-primary" id="btn-save-entry" data-sr="Sačuvaj u žurnal" data-en="Save to journal">Sačuvaj u žurnal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL 4: DETALJ ZAPISA SA MAPE -->
+  <div class="sheet-backdrop" id="modal-detail" role="dialog" aria-modal="true" aria-labelledby="detail-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="detail-title">Zapis</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body" id="detail-body"></div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-primary" data-close-modal data-sr="Zatvori" data-en="Close">Zatvori</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL 5: PROFIL STUDENTA I STATUS TIMA -->
+  <div class="sheet-backdrop" id="modal-profile" role="dialog" aria-modal="true" aria-labelledby="prof-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="prof-title" data-sr="Tvoj tim i potpis" data-en="Your Team & Signature">Tvoj tim i potpis</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="alert-box ok" id="prof-summary"></div>
+        <div class="field">
+          <label for="prof-nadimak" data-sr="Tvoje ime ili nadimak na zapisima" data-en="Your name or nickname on entries">Tvoje ime ili nadimak na zapisima</label>
+          <input class="input" id="prof-nadimak" type="text" maxlength="32">
+        </div>
+        <div id="prof-queue-box" class="alert-box warn" hidden></div>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-secondary" id="btn-sync-now" data-sr="Sinhronizuj sad" data-en="Sync now">Sinhronizuj sad</button>
+        <button type="button" class="btn-primary" id="btn-save-profile" data-sr="Sačuvaj potpis" data-en="Save signature">Sačuvaj potpis</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-msg" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "Urbani žurnal · Computing Studio",
+  "short_name": "Urbani žurnal",
+  "description": "Urbani dnevnik opažanja, memorije i subjektivnog doživljaja grada · Computing Studio",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f3eb",
+  "theme_color": "#1f1d18",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
