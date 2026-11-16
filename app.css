@@ -29,6 +29,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--sans);
@@ -611,6 +612,37 @@ button, input, textarea, select {
   text-decoration: underline;
 }
 
+.link-btn.danger {
+  color: var(--err);
+}
+
+.entry-foot-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.video-proc-note {
+  font-size: 12px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border: 1px solid #e2d5b0;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.inline-edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 9px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
 /* 4. DONJA AKCIONA TRAKA */
 .actionbar {
   display: flex;
@@ -848,6 +880,7 @@ button, input, textarea, select {
 .sheet-body {
   padding: 16px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   min-height: 0;
   flex: 1 1 auto;
