@@ -317,6 +317,39 @@
     </div>
   </div>
 
+      <!-- PANEL 6: POMOĆ ZA UKLJUČIVANJE LOKACIJE (GPS) -->
+  <div class="sheet-backdrop" id="modal-gps-help" role="dialog" aria-modal="true" aria-labelledby="gps-help-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="gps-help-title" data-sr="Kako uključiti GPS lokaciju" data-en="How to Enable GPS Location">Kako uključiti GPS lokaciju</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="alert-box warn" data-sr="Pregledač trenutno nema dozvolu za čitanje lokacije telefona. Zapis u Urbanom žurnalu beleži stvarno mesto na kom stojiš." data-en="Your browser currently does not have permission to access phone location. Urban Journal records the real place where you stand.">
+          Pregledač trenutno nema dozvolu za čitanje lokacije telefona. Zapis u Urbanom žurnalu beleži stvarno mesto na kom stojiš.
+        </div>
+        <div class="field">
+          <label data-sr="Na Android telefonu (Chrome):" data-en="On Android (Chrome):">Na Android telefonu (Chrome):</label>
+          <ol class="steps-list">
+            <li data-sr="Uključi Lokaciju u brzim podešavanjima telefona (prevuci ekran odozgo)." data-en="Turn on Location in your phone's Quick Settings.">Uključi Lokaciju u brzim podešavanjima telefona (prevuci ekran odozgo).</li>
+            <li data-sr="U Chrome-u dodirni ikonicu levo od adrese sajta → Dozvole (Permissions) → Lokacija → Dozvoli." data-en="Tap the icon left of the address bar → Permissions → Location → Allow.">U Chrome-u dodirni ikonicu levo od adrese sajta → Dozvole (Permissions) → Lokacija → Dozvoli.</li>
+          </ol>
+        </div>
+        <div class="field">
+          <label data-sr="Na iPhone-u (Safari):" data-en="On iPhone (Safari):">Na iPhone-u (Safari):</label>
+          <ol class="steps-list">
+            <li data-sr="Otvori Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App (uključi Precise Location)." data-en="Open Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App (enable Precise Location).">Otvori Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App (uključi Precise Location).</li>
+            <li data-sr="U Safariju dodirni aA ili ikonicu pored adrese → Website Settings → Location → Allow." data-en="In Safari tap aA or the address bar icon → Website Settings → Location → Allow.">U Safariju dodirni aA ili ikonicu pored adrese → Website Settings → Location → Allow.</li>
+          </ol>
+        </div>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-secondary" data-close-modal data-sr="Zatvori" data-en="Close">Zatvori</button>
+        <button type="button" class="btn-primary" id="btn-retry-gps" data-sr="Probaj ponovo GPS" data-en="Retry GPS">Probaj ponovo GPS</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-msg" id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
