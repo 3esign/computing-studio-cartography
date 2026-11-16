@@ -115,8 +115,8 @@
     const ta = document.getElementById('comp-text');
     if (ta) {
       ta.placeholder = STANJE.jezik === 'en'
-        ? 'What do you notice here? What impression, sound, detail, or memory does this place hold?'
-        : 'Šta primećuješ u prostoru? Kakav utisak, zvuk, detalj ili sećanje nosi ovo mesto?';
+        ? 'How do you experience this place, surroundings, or movement through your chosen neighborhood?'
+        : 'Šta primećuješ u prostoru? Kako beležiš doživljaj okruženja, zvuk, sećanje ili kretanje kroz kraj?';
     }
     osveziZaglavljeSesije();
     osveziStatusTraku();
@@ -510,6 +510,8 @@
 
   function otvoriPanel(id) {
     if (id !== 'modal-login') zaustaviQrKameru();
+    const tst = document.getElementById('toast');
+    if (tst) tst.hidden = true;
     for (const pid of SVI_PANELI) {
       const el = document.getElementById(pid);
       if (el) el.hidden = pid !== id;
@@ -882,7 +884,8 @@
       ? `${STANJE.gps.lat.toFixed(5)}, ${STANJE.gps.lon.toFixed(5)} (±${STANJE.gps.tacnost_m} m)`
       : t('gpsTrazi');
     const sadTxt = new Date().toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' });
-    el.innerHTML = `<span><strong>${esc(timTxt)}</strong></span> · <span>Nedelja ${STANJE.aktivnaNedelja}</span> · <span>${esc(gpsTxt)}</span> · <span>${esc(sadTxt)}</span>`;
+    const vezbaTxt = STANJE.jezik === 'en' ? `Exercise ${STANJE.aktivnaNedelja}` : `Vežba ${STANJE.aktivnaNedelja}`;
+    el.innerHTML = `<span><strong>${esc(timTxt)}</strong></span> · <span>${esc(vezbaTxt)}</span> · <span>${esc(gpsTxt)}</span> · <span>${esc(sadTxt)}</span>`;
   }
 
   function otvoriKompozitor() {
@@ -1064,47 +1067,66 @@
     await idbObrisiIzReda(stavka.uuid_klijenta);
   }
 
-  async function sinhronizujRed() {
-    if (STANJE.sinhronizacijaUToku) return false;
-    STANJE.lokalniRed = await idbSviIzReda();
-    osveziStatusTraku();
-    if (STANJE.lokalniRed.length === 0 || !STANJE.sesija || !STANJE.sesija.tajna) {
-      return STANJE.lokalniRed.length === 0;
-    }
+  let aktivniSyncPromis = null;
+  let traziDodatniSync = false;
 
-    STANJE.sinhronizacijaUToku = true;
-    let sveUspelo = true;
-    try {
-      // Šaljemo hronološki od najstarijeg ka najnovijem
-      const sortirano = [...STANJE.lokalniRed].sort((a, b) => String(a.vreme_telefona).localeCompare(String(b.vreme_telefona)));
-      for (const st of sortirano) {
-        try {
-          await posaljiJedanIzReda(st);
-        } catch {
-          sveUspelo = false;
-          break;
-        }
-      }
-      STANJE.lokalniRed = await idbSviIzReda();
-      osveziStatusTraku();
-      if (sveUspelo) {
-        await ucitajStanjeSaServera();
-      } else {
-        crtajPodatke();
-      }
-    } finally {
-      STANJE.sinhronizacijaUToku = false;
+  async function sinhronizujRed() {
+    if (aktivniSyncPromis) {
+      traziDodatniSync = true;
+      return aktivniSyncPromis;
     }
-    return sveUspelo;
+    aktivniSyncPromis = (async () => {
+      STANJE.sinhronizacijaUToku = true;
+      let sveUspelo = true;
+      try {
+        do {
+          traziDodatniSync = false;
+          STANJE.lokalniRed = await idbSviIzReda();
+          osveziStatusTraku();
+          if (STANJE.lokalniRed.length === 0 || !STANJE.sesija || !STANJE.sesija.tajna) {
+            break;
+          }
+          // Šaljemo hronološki od najstarijeg ka najnovijem
+          const sortirano = [...STANJE.lokalniRed].sort((a, b) => String(a.vreme_telefona).localeCompare(String(b.vreme_telefona)));
+          for (const st of sortirano) {
+            try {
+              await posaljiJedanIzReda(st);
+            } catch {
+              sveUspelo = false;
+              traziDodatniSync = false;
+              break;
+            }
+          }
+        } while (traziDodatniSync && sveUspelo);
+
+        STANJE.lokalniRed = await idbSviIzReda();
+        osveziStatusTraku();
+        if (sveUspelo) {
+          await ucitajStanjeSaServera();
+        } else {
+          crtajPodatke(true);
+        }
+      } finally {
+        STANJE.sinhronizacijaUToku = false;
+        aktivniSyncPromis = null;
+      }
+      return sveUspelo && STANJE.lokalniRed.length === 0;
+    })();
+    return aktivniSyncPromis;
   }
 
-  // --- Učitavanje javnog stanja mape i dnevnika ---
+  // --- Učitavanje javnog stanja mape i dnevnika (zaštićeno od zastarelih paralelnih odgovora) ---
+  let stanjeZahtevGen = 0;
+  let poslednjiPrimenjenGen = 0;
+
   async function ucitajStanjeSaServera() {
+    const mojGen = ++stanjeZahtevGen;
     try {
       const r = await apiPoziv('/api/stanje', { method: 'GET' });
-      if (!r.ok) return;
+      if (!r.ok || mojGen < poslednjiPrimenjenGen) return;
       const j = await r.json();
-      if (!j || !j.ok) return;
+      if (!j || !j.ok || mojGen < poslednjiPrimenjenGen) return;
+      poslednjiPrimenjenGen = mojGen;
       STANJE.aktivnaNedelja = j.aktivna_nedelja || 1;
       STANJE.serverZapisi = Array.isArray(j.zapisi) ? j.zapisi : [];
       STANJE.serverStatistika = j.statistika || { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} };
@@ -1113,7 +1135,7 @@
         zapisi: STANJE.serverZapisi,
         statistika: STANJE.serverStatistika
       });
-      crtajPodatke();
+      crtajPodatke(false);
     } catch {
       // U offline režimu prikaži poslednje keširano stanje
       if (STANJE.serverZapisi.length === 0) {
@@ -1122,33 +1144,42 @@
           STANJE.aktivnaNedelja = kes.aktivnaNedelja || 1;
           STANJE.serverZapisi = kes.zapisi || [];
           STANJE.serverStatistika = kes.statistika || STANJE.serverStatistika;
-          crtajPodatke();
+          crtajPodatke(false);
         }
       }
     }
   }
 
   function sviVidljiviZapisi() {
-    const lokalni = STANJE.lokalniRed.map(q => ({
-      id: 'local-' + q.uuid_klijenta,
-      uTelefonu: true,
-      tim: q.tim,
-      autor: q.nadimak || q.oznaka_uredjaja || 'član tima',
-      nedelja: q.nedelja,
-      kategorije: q.kategorije || [],
-      lat: q.lat,
-      lon: q.lon,
-      tacnost_m: q.tacnost_m,
-      radijus_m: q.radijus_m,
-      vreme: q.vreme_telefona,
-      tekst: q.tekst,
-      prilozi: (q.prilozi || []).map(p => ({
-        vrsta: p.vrsta,
-        mime: p.mime,
-        lokalniBlob: p.blob
-      }))
-    }));
-    const spojeno = [...lokalni, ...STANJE.serverZapisi];
+    const serverUuidSkup = new Set();
+    for (const sz of STANJE.serverZapisi) {
+      if (sz && sz.uuid_klijenta) serverUuidSkup.add(sz.uuid_klijenta);
+    }
+    const lokalni = STANJE.lokalniRed
+      .filter(q => !q.uuid_klijenta || !serverUuidSkup.has(q.uuid_klijenta))
+      .map(q => ({
+        id: 'local-' + q.uuid_klijenta,
+        uuid_klijenta: q.uuid_klijenta,
+        uTelefonu: true,
+        tim: q.tim,
+        autor: q.nadimak || q.oznaka_uredjaja || 'član tima',
+        nedelja: q.nedelja,
+        kategorije: q.kategorije || [],
+        lat: q.lat,
+        lon: q.lon,
+        tacnost_m: q.tacnost_m,
+        radijus_m: q.radijus_m,
+        vreme: q.vreme_telefona,
+        tekst: q.tekst,
+        prilozi: (q.prilozi || []).map(p => ({
+          vrsta: p.vrsta,
+          mime: p.mime,
+          lokalniBlob: p.blob
+        }))
+      }));
+    const spojeno = [...lokalni, ...STANJE.serverZapisi].sort((a, b) =>
+      String(b.vreme || '').localeCompare(String(a.vreme || ''))
+    );
     if (STANJE.filter === 'tim' && STANJE.sesija && STANJE.sesija.tim) {
       return spojeno.filter(z => z.tim === STANJE.sesija.tim);
     }
@@ -1204,8 +1235,27 @@
     `;
   }
 
-  function crtajPodatke() {
-    oslobodiAktivneBlobUrlove();
+  let poslednjiPotpisPrikaza = '';
+
+  function napraviPotpisPrikaza(zapisi, m2) {
+    const delovi = [`${STANJE.jezik}|${STANJE.filter}|${m2}|${zapisi.length}`];
+    for (const z of zapisi) {
+      const pr = (z.prilozi || []).map(p => `${p.id || 'L'}:${p.vrsta}:${p.obrada_status || ''}:${p.url || ''}`).join(',');
+      delovi.push(`${z.id}|${z.uuid_klijenta || ''}|${z.uTelefonu ? 1 : 0}|${z.tim}|${z.autor}|${z.vreme}|${(z.tekst || '').length}|${pr}`);
+    }
+    return delovi.join('~');
+  }
+
+  function aktivnaReprodukcijaUDnevniku(feed) {
+    if (!feed) return null;
+    const mediji = feed.querySelectorAll('audio, video');
+    for (const m of mediji) {
+      if (!m.paused && !m.ended) return m;
+    }
+    return null;
+  }
+
+  function crtajPodatke(prisilno = false) {
     const zapisi = sviVidljiviZapisi();
     document.getElementById('count-entries').textContent = String(zapisi.length);
 
@@ -1217,8 +1267,36 @@
     }
     document.getElementById('metric-m2').textContent = `${m2.toLocaleString('sr-RS')} m²`;
 
-    // Hronološki feed u Dnevniku
+    // Uvek osveži slojeve 3D mape (brzo i bez prekidanja DOM elemenata)
+    azurirajSlojeveMape(zapisi);
+
+    const noviPotpis = napraviPotpisPrikaza(zapisi, m2);
+    if (!prisilno && noviPotpis === poslednjiPotpisPrikaza) {
+      return;
+    }
+
+    // Ne prekidaj aktivno slušanje zvuka ili gledanje videa u Dnevniku pri pozadinskom osvežavanju
     const feed = document.getElementById('journal-feed');
+    const aktivniMedij = !prisilno ? aktivnaReprodukcijaUDnevniku(feed) : null;
+    if (aktivniMedij) {
+      if (!aktivniMedij._cekaOsvezavanje) {
+        aktivniMedij._cekaOsvezavanje = true;
+        const odlozeno = () => {
+          aktivniMedij._cekaOsvezavanje = false;
+          crtajPodatke(true);
+        };
+        aktivniMedij.addEventListener('pause', odlozeno, { once: true });
+        aktivniMedij.addEventListener('ended', odlozeno, { once: true });
+      }
+      return;
+    }
+
+    poslednjiPotpisPrikaza = noviPotpis;
+    if (document.getElementById('modal-detail').hidden) {
+      oslobodiAktivneBlobUrlove();
+    }
+
+    // Hronološki feed u Dnevniku
     if (zapisi.length === 0) {
       feed.innerHTML = `<div class="entry-card"><p class="entry-text" style="color:var(--ink-soft)">${esc(t('nemaZapisa'))}</p></div>`;
     } else {
@@ -1261,8 +1339,6 @@
         };
       });
     }
-
-    azurirajSlojeveMape(zapisi);
   }
 
   // --- 3D Mapa Beograda (MapLibre GL + OpenFreeMap + metrički krugovi iskustva) ---
@@ -1277,12 +1353,28 @@
     return [koordinate];
   }
 
-  function otvoriDetaljZapisa(z) {
-    document.getElementById('detail-title').textContent = `${z.tim} · ${z.autor}`;
+  function otvoriDetaljZapisa(ulaz, aktivniIndeks = 0) {
+    const lista = Array.isArray(ulaz) ? ulaz.filter(Boolean) : (ulaz ? [ulaz] : []);
+    if (!lista.length) return;
+    const i = Math.max(0, Math.min(lista.length - 1, Number(aktivniIndeks) || 0));
+    const z = lista[i];
+
+    document.getElementById('detail-title').textContent = lista.length > 1
+      ? `${z.tim} · ${z.autor} (${i + 1}/${lista.length})`
+      : `${z.tim} · ${z.autor}`;
+
+    const prekidacHtml = lista.length > 1
+      ? `<div class="detail-switcher">${lista.map((st, k) =>
+          `<button type="button" class="detail-switch-btn ${k === i ? 'active' : ''}" data-det-idx="${k}">${k + 1}. ${esc(st.tim)} · ${esc(st.autor)}</button>`
+        ).join('')}</div>`
+      : '';
+
     const tagHtml = (z.kategorije || []).length
       ? `<div class="tag-row">${z.kategorije.map(k => `<span class="tag-pill">${esc(k)}</span>`).join('')}</div>`
       : '';
-    document.getElementById('detail-body').innerHTML = `
+    const teloEl = document.getElementById('detail-body');
+    teloEl.innerHTML = `
+      ${prekidacHtml}
       <div class="meta-strip">
         <span>${esc(formatVreme(z.vreme))}</span> ·
         <span>GPS ${Number(z.lat).toFixed(5)}, ${Number(z.lon).toFixed(5)} (±${Math.round(z.tacnost_m || 12)} m)</span>
@@ -1292,12 +1384,47 @@
       ${z.tekst ? `<p class="entry-text">${esc(z.tekst)}</p>` : ''}
       ${htmlPriloziZapisa(z.prilozi)}
     `;
+    teloEl.querySelectorAll('[data-det-idx]').forEach(btn => {
+      btn.onclick = () => otvoriDetaljZapisa(lista, Number(btn.getAttribute('data-det-idx')));
+    });
     otvoriPanel('modal-detail');
   }
 
   function azurirajSlojeveMape(zapisi) {
     if (!STANJE.mapa || !STANJE.mapaSpremna) return;
     const mojTim = STANJE.sesija ? STANJE.sesija.tim : '';
+
+    // Grupiši zapise koji padaju u istu mikro-tačku (~1.5 m) kako se pinovi članova istog tima ne bi sakrili jedan ispod drugog
+    const grupeBliskih = new Map();
+    zapisi.forEach((z, idx) => {
+      const lat = Number(z.lat);
+      const lon = Number(z.lon);
+      const kljuc = `${Math.round(lat * 74000)}:${Math.round(lon * 52000)}`;
+      let g = grupeBliskih.get(kljuc);
+      if (!g) {
+        g = [];
+        grupeBliskih.set(kljuc, g);
+      }
+      g.push(idx);
+    });
+
+    const pomereneTacke = new Map();
+    for (const indeksi of grupeBliskih.values()) {
+      if (indeksi.length <= 1) continue;
+      const br = indeksi.length;
+      indeksi.forEach((zIdx, poz) => {
+        const z = zapisi[zIdx];
+        const lat = Number(z.lat);
+        const lon = Number(z.lon);
+        const prsten = Math.floor(poz / 6);
+        const uPrstenu = Math.min(6, br - prsten * 6);
+        const ugao = ((poz % 6) / uPrstenu) * 2 * Math.PI;
+        const rMetara = 2.0 + prsten * 1.6;
+        const dLat = (rMetara * Math.sin(ugao)) / 111132;
+        const dLon = (rMetara * Math.cos(ugao)) / (111320 * Math.cos((lat * Math.PI) / 180));
+        pomereneTacke.set(zIdx, [lon + dLon, lat + dLat]);
+      });
+    }
 
     const krugoviFeatures = zapisi.map((z, idx) => ({
       type: 'Feature',
@@ -1322,7 +1449,7 @@
       },
       geometry: {
         type: 'Point',
-        coordinates: [Number(z.lon), Number(z.lat)]
+        coordinates: pomereneTacke.get(idx) || [Number(z.lon), Number(z.lat)]
       }
     }));
 
@@ -1432,9 +1559,32 @@
 
         mapa.on('click', 'uz-tacke-krug', e => {
           if (!e.features || !e.features.length) return;
-          const idx = Number(e.features[0].properties.idx);
-          const z = (STANJE._poslednjiZapisiMape || [])[idx];
-          if (z) otvoriDetaljZapisa(z);
+          const svi = STANJE._poslednjiZapisiMape || [];
+          let kandidati = e.features;
+          if (e.point && typeof mapa.queryRenderedFeatures === 'function') {
+            try {
+              const uBlizini = mapa.queryRenderedFeatures(
+                [[e.point.x - 14, e.point.y - 14], [e.point.x + 14, e.point.y + 14]],
+                { layers: ['uz-tacke-krug'] }
+              );
+              if (uBlizini && uBlizini.length) kandidati = uBlizini;
+            } catch {}
+          }
+          const kliknutiIdx = Number(e.features[0].properties.idx);
+          const vidjeni = new Set();
+          const listaZapisa = [];
+          let aktivni = 0;
+          for (const f of kandidati) {
+            const ix = Number(f.properties && f.properties.idx);
+            if (!Number.isFinite(ix) || vidjeni.has(ix) || !svi[ix]) continue;
+            vidjeni.add(ix);
+            if (ix === kliknutiIdx) aktivni = listaZapisa.length;
+            listaZapisa.push(svi[ix]);
+          }
+          if (!listaZapisa.length && svi[kliknutiIdx]) {
+            listaZapisa.push(svi[kliknutiIdx]);
+          }
+          if (listaZapisa.length) otvoriDetaljZapisa(listaZapisa, aktivni);
         });
 
         mapa.on('mouseenter', 'uz-tacke-krug', () => { mapa.getCanvas().style.cursor = 'pointer'; });
@@ -1482,13 +1632,19 @@
 
     document.getElementById('btn-info').onclick = () => otvoriPanel('modal-info');
 
-    document.getElementById('btn-profil').onclick = () => {
+    document.getElementById('btn-profil').onclick = async () => {
       if (!STANJE.sesija || !STANJE.sesija.tajna) {
         pripremiPrijavuPanel();
         return;
       }
-      document.getElementById('prof-summary').textContent =
-        `Tim ${STANJE.sesija.tim} · ${STANJE.sesija.oznaka || 'aktivan uređaj'}`;
+      const ispisiRezime = () => {
+        const s = STANJE.sesija;
+        if (!s) return;
+        const mesta = s.limit > 0 ? ` · povezano ${s.zauzeto}/${s.limit} uređaja u timu` : '';
+        document.getElementById('prof-summary').textContent =
+          `Tim ${s.tim} · ${s.oznaka || 'aktivan uređaj'}${mesta}`;
+      };
+      ispisiRezime();
       document.getElementById('prof-nadimak').value = STANJE.sesija.nadimak || '';
       const qb = document.getElementById('prof-queue-box');
       if (STANJE.lokalniRed.length > 0) {
@@ -1498,6 +1654,17 @@
         qb.hidden = true;
       }
       otvoriPanel('modal-profile');
+      try {
+        const r = await apiPoziv('/api/ja', { method: 'GET' });
+        const j = await r.json();
+        if (r.ok && j && j.ok && STANJE.sesija) {
+          STANJE.sesija.zauzeto = j.zauzeto;
+          STANJE.sesija.limit = j.limit;
+          STANJE.sesija.oznaka = j.oznaka || STANJE.sesija.oznaka;
+          sacuvajSesiju(STANJE.sesija);
+          ispisiRezime();
+        }
+      } catch {}
     };
 
     document.getElementById('btn-save-profile').onclick = async () => {
@@ -1513,6 +1680,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nadimak: novi })
         });
+        await ucitajStanjeSaServera();
       } catch {}
     };
 
