@@ -721,8 +721,15 @@ button, input, textarea, select {
 
 .media-picker-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+}
+
+.media-btn.media-btn-main {
+  border-style: solid;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #ffffff;
 }
 
 @media (max-width: 380px) {

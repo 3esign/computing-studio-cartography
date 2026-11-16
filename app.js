@@ -1410,23 +1410,15 @@
       };
     });
 
-    document.getElementById('inp-file-photo').onchange = async e => {
-      const fajlovi = Array.from(e.target.files || []);
-      e.target.value = '';
-      for (const f of fajlovi) {
-        try {
-          const opt = await optimizujSliku(f);
-          dodajPrilogUKompozitor(opt);
-        } catch (err) {
-          toast(err.message || 'Slika nije mogla da se obradi.');
-        }
+    const dodajSliku = async f => {
+      try {
+        const opt = await optimizujSliku(f);
+        dodajPrilogUKompozitor(opt);
+      } catch (err) {
+        toast(err.message || 'Slika nije mogla da se obradi.');
       }
     };
-
-    document.getElementById('inp-file-video').onchange = e => {
-      const f = (e.target.files || [])[0];
-      e.target.value = '';
-      if (!f) return;
+    const dodajSnimak = f => {
       if (f.size > 50 * 1024 * 1024) {
         toast('Fajl prelazi 50 MB. Snimi kraći video (do 60 sekundi).');
         return;
@@ -1441,6 +1433,20 @@
         visina: 0,
         trajanje: 0
       });
+    };
+    const jeSlika = f => (f.type || '').startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(f.name || '');
+    const uzmiFajlove = e => { const l = Array.from(e.target.files || []); e.target.value = ''; return l; };
+
+    document.getElementById('inp-cam-photo').onchange = async e => {
+      for (const f of uzmiFajlove(e)) await dodajSliku(f);
+    };
+    document.getElementById('inp-cam-video').onchange = e => {
+      for (const f of uzmiFajlove(e)) dodajSnimak(f);
+    };
+    document.getElementById('inp-file-galerija').onchange = async e => {
+      for (const f of uzmiFajlove(e)) {
+        if (jeSlika(f)) await dodajSliku(f); else dodajSnimak(f);
+      }
     };
 
     document.getElementById('btn-record-audio').onclick = prekidacSnimanjaZvuka;

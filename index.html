@@ -220,21 +220,26 @@
         <div class="field">
           <label data-sr="Dodaj medijski trag (foto, zvuk grada ili kratak video)" data-en="Add media trace (photo, city sound, or short video)">Dodaj medijski trag (foto, zvuk grada ili kratak video)</label>
           <div class="media-picker-row">
-            <label class="media-btn" for="inp-file-photo">
+            <label class="media-btn media-btn-main" for="inp-cam-photo">
               <span aria-hidden="true">📷</span>
-              <span data-sr="Fotografija" data-en="Photo">Fotografija</span>
+              <span data-sr="Slikaj" data-en="Take photo">Slikaj</span>
+            </label>
+            <label class="media-btn" for="inp-cam-video">
+              <span aria-hidden="true">🎬</span>
+              <span data-sr="Snimi video" data-en="Record video">Snimi video</span>
             </label>
             <button type="button" class="media-btn" id="btn-record-audio">
               <span aria-hidden="true" id="rec-icon">🎙️</span>
               <span id="rec-label" data-sr="Snimi zvuk" data-en="Record sound">Snimi zvuk</span>
             </button>
-            <label class="media-btn" for="inp-file-video">
-              <span aria-hidden="true">🎬</span>
-              <span data-sr="Video / Audio" data-en="Video / Audio">Video / Audio</span>
+            <label class="media-btn" for="inp-file-galerija">
+              <span aria-hidden="true">🖼️</span>
+              <span data-sr="Iz galerije" data-en="From gallery">Iz galerije</span>
             </label>
           </div>
-          <input type="file" id="inp-file-photo" accept="image/*" multiple hidden>
-          <input type="file" id="inp-file-video" accept="video/*,audio/*" hidden>
+          <input type="file" id="inp-cam-photo" accept="image/*" capture="environment" hidden>
+          <input type="file" id="inp-cam-video" accept="video/*" capture="environment" hidden>
+          <input type="file" id="inp-file-galerija" accept="image/*,video/*,audio/*" multiple hidden>
           <span class="hint" data-sr="Slike se automatski optimizuju na telefonu bez skrivenih EXIF podataka. Video do 60 s (50 MB)." data-en="Photos are automatically optimized on device with EXIF removed. Video up to 60 s (50 MB).">Slike se automatski optimizuju na telefonu bez skrivenih EXIF podataka. Video do 60 s (50 MB).</span>
         </div>
 
