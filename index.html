@@ -135,7 +135,30 @@
 
         <div id="manual-code-fields">
           <div class="field" style="margin-bottom:10px">
-            <label for="inp-tim" data-sr="Oznaka tima" data-en="Team ID">Oznaka tima</label>
+            <label data-sr="Skeniraj ili učitaj QR kod tima" data-en="Scan or load team QR code">Skeniraj ili učitaj QR kod tima</label>
+            <div class="media-picker-row">
+              <button type="button" class="media-btn media-btn-main" id="btn-scan-qr-cam">
+                <span aria-hidden="true">📷</span>
+                <span data-sr="Skeniraj QR" data-en="Scan QR">Skeniraj QR</span>
+              </button>
+              <label class="media-btn" for="inp-qr-image">
+                <span aria-hidden="true">🖼️</span>
+                <span data-sr="Slika QR koda" data-en="QR from image">Slika QR koda</span>
+              </label>
+            </div>
+            <input type="file" id="inp-qr-image" accept="image/*" hidden>
+            <input type="file" id="inp-qr-snap" accept="image/*" capture="environment" hidden>
+            <div class="qr-cam-box" id="qr-cam-box" hidden>
+              <video id="qr-cam-video" playsinline muted></video>
+              <div class="qr-cam-foot">
+                <span data-sr="Usmeri kameru u QR kod tima…" data-en="Point camera at team QR…">Usmeri kameru u QR kod tima…</span>
+                <button type="button" class="btn-secondary" id="btn-stop-qr-cam" data-sr="Zatvori" data-en="Close">Zatvori</button>
+              </div>
+            </div>
+            <span class="hint" data-sr="Prijavljen si u drugom pregledaču na istom telefonu? Tamo dodirni svoj tim gore desno i prebaci prijavu u Chrome / Safari." data-en="Signed in within another browser on this phone? Tap your team badge there to transfer your sign-in to Chrome / Safari.">Prijavljen si u drugom pregledaču na istom telefonu? Tamo dodirni svoj tim gore desno i prebaci prijavu u Chrome / Safari.</span>
+          </div>
+          <div class="field" style="margin-bottom:10px">
+            <label for="inp-tim" data-sr="Oznaka tima (ili ručni unos)" data-en="Team ID (or manual entry)">Oznaka tima (ili ručni unos)</label>
             <input class="input" id="inp-tim" type="text" placeholder="npr. T07" autocomplete="off" autocapitalize="characters">
           </div>
           <div class="field">
@@ -280,6 +303,11 @@
           <input class="input" id="prof-nadimak" type="text" maxlength="32">
         </div>
         <div id="prof-queue-box" class="alert-box warn" hidden></div>
+        <div class="field">
+          <label data-sr="Prelazak u drugi pregledač (Chrome / Safari)" data-en="Switch to another browser (Chrome / Safari)">Prelazak u drugi pregledač (Chrome / Safari)</label>
+          <button type="button" class="btn-secondary" id="btn-transfer-session" style="width:100%" data-sr="↗ Kopiraj link za prenos ove prijave (isto mesto)" data-en="↗ Copy link to transfer this sign-in (same seat)">↗ Kopiraj link za prenos ove prijave (isto mesto)</button>
+          <span class="hint" data-sr="Svaki pregledač na telefonu ima odvojenu memoriju. Ovim linkom prenosiš isto mesto u Chrome ili Safari bez ponovnog skeniranja QR-a." data-en="Each browser app has separate storage. This link moves your active seat to Chrome or Safari without rescanning.">Svaki pregledač na telefonu ima odvojenu memoriju. Ovim linkom prenosiš isto mesto u Chrome ili Safari bez ponovnog skeniranja QR-a.</span>
+        </div>
       </div>
       <div class="sheet-foot">
         <button type="button" class="btn-secondary" id="btn-sync-now" data-sr="Sinhronizuj sad" data-en="Sync now">Sinhronizuj sad</button>

@@ -267,25 +267,68 @@
     }
   }
 
-  // --- Čitanje QR koda iz #hash (odmah čisti URL traku!) ---
+  // --- Čitanje QR koda ili prenosa prijave iz #hash (odmah čisti URL traku!) ---
+  function izvuciQrIzTeksta(sirovo) {
+    const s = String(sirovo || '').trim();
+    if (!s) return null;
+    const m = /(?:^|#)(T\d{2})-([A-Za-z0-9]{4,28})\b/i.exec(s);
+    if (m) return { tim: m[1].toUpperCase(), kod: m[2].toUpperCase() };
+    const hp = s.indexOf('#');
+    if (hp >= 0) {
+      const p = new URLSearchParams(s.slice(hp + 1));
+      const pt = p.get('t') || p.get('tim');
+      const pk = p.get('k') || p.get('kod');
+      if (pt && pk) return { tim: pt.trim().toUpperCase(), kod: pk.trim().toUpperCase() };
+    }
+    return null;
+  }
+
+  function procitajPrenosIzUrl() {
+    const siroviHash = String(location.hash || '').trim();
+    const m = /^#prenos=([A-Za-z0-9_-]{16,800})$/.exec(siroviHash);
+    if (!m) return false;
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      let b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4 !== 0) b64 += '=';
+      const dekodirano = decodeURIComponent(escape(atob(b64)));
+      const p = JSON.parse(dekodirano);
+      if (p && typeof p.tim === 'string' && typeof p.tajna === 'string' && p.tajna.length >= 20) {
+        sacuvajSesiju({
+          tim: p.tim.trim().toUpperCase(),
+          uredjaj_id: Number(p.uredjaj_id || 0),
+          oznaka: String(p.oznaka || ''),
+          nadimak: String(p.nadimak || ''),
+          tajna: p.tajna.trim(),
+          zauzeto: 0,
+          limit: 0
+        });
+        localStorage.setItem(LS_PRVI_PUT, '1');
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function napraviLinkPrenosa() {
+    if (!STANJE.sesija || !STANJE.sesija.tajna) return '';
+    const json = JSON.stringify({
+      tim: STANJE.sesija.tim,
+      tajna: STANJE.sesija.tajna,
+      nadimak: STANJE.sesija.nadimak || '',
+      oznaka: STANJE.sesija.oznaka || '',
+      uredjaj_id: STANJE.sesija.uredjaj_id || 0
+    });
+    const b64 = btoa(unescape(encodeURIComponent(json)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    return `${location.origin}${location.pathname}#prenos=${b64}`;
+  }
+
   function procitajQrIzUrl() {
     const siroviHash = String(location.hash || '').trim();
-    let nadjeno = null;
-    if (siroviHash.length > 2) {
-      // Format 1 (QR-timovi-telefon.pdf): #<tim>-<kod>
-      const m = /^#(T\d{2})-([A-Za-z0-9]{4,28})$/i.exec(siroviHash);
-      if (m) {
-        nadjeno = { tim: m[1].toUpperCase(), kod: m[2].toUpperCase() };
-      } else {
-        // Format 2: #t=T07&k=XXXXXXXXXX
-        const p = new URLSearchParams(siroviHash.slice(1));
-        const pt = p.get('t') || p.get('tim');
-        const pk = p.get('k') || p.get('kod');
-        if (pt && pk) {
-          nadjeno = { tim: pt.trim().toUpperCase(), kod: pk.trim().toUpperCase() };
-        }
-      }
-    }
+    const nadjeno = siroviHash.length > 2 ? izvuciQrIzTeksta(siroviHash) : null;
     if (nadjeno) {
       sessionStorage.setItem(SS_PENDING_QR, JSON.stringify(nadjeno));
       history.replaceState(null, '', location.pathname + location.search);
@@ -300,13 +343,173 @@
 
   function jePrivremeniPregledac() {
     const ua = navigator.userAgent || '';
-    return /Viber|Instagram|FBAN|FBAV|WhatsApp|Line\/|TikTok|BytedanceWebview|; wv\)/i.test(ua);
+    return /Comet|Viber|Instagram|FBAN|FBAV|WhatsApp|Line\/|TikTok|BytedanceWebview|; wv\)/i.test(ua);
+  }
+
+  // --- Skeniranje ili učitavanje slike QR koda direktno u panelu prijave ---
+  let qrKameraStream = null;
+  let qrKameraTajmer = null;
+
+  function zaustaviQrKameru() {
+    if (qrKameraTajmer) {
+      clearInterval(qrKameraTajmer);
+      qrKameraTajmer = null;
+    }
+    if (qrKameraStream) {
+      qrKameraStream.getTracks().forEach(tr => tr.stop());
+      qrKameraStream = null;
+    }
+    const vid = document.getElementById('qr-cam-video');
+    if (vid) vid.srcObject = null;
+    const box = document.getElementById('qr-cam-box');
+    if (box) box.hidden = true;
+  }
+
+  async function primeniPrepoznatQr(par) {
+    zaustaviQrKameru();
+    STANJE.pendingQr = par;
+    sessionStorage.setItem(SS_PENDING_QR, JSON.stringify(par));
+    await pripremiPrijavuPanel();
+    const inpNad = document.getElementById('inp-nadimak');
+    if (inpNad && !inpNad.value) inpNad.focus();
+  }
+
+  async function pripremiSlikuZaQrServer(fajl) {
+    const url = URL.createObjectURL(fajl);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Neuspešno čitanje slike.'));
+        i.src = url;
+      });
+      const maks = 1200;
+      let w = img.naturalWidth || img.width || 800;
+      let h = img.naturalHeight || img.height || 800;
+      if (w > maks || h > maks) {
+        if (w >= h) { h = Math.round((h * maks) / w); w = maks; }
+        else { w = Math.round((w * maks) / h); h = maks; }
+      }
+      const pl = document.createElement('canvas');
+      pl.width = w;
+      pl.height = h;
+      pl.getContext('2d').drawImage(img, 0, 0, w, h);
+      const blob = await new Promise(r => pl.toBlob(r, 'image/png'));
+      return blob || fajl;
+    } catch {
+      return fajl;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function dekodirajQrIzFajla(fajl) {
+    if (!fajl) return;
+    const errBox = document.getElementById('login-error-box');
+    errBox.hidden = true;
+
+    // 1. Pokušaj ugrađenim BarcodeDetector-om u samom pregledaču (trenutno na Android Chrome-u)
+    if (typeof window.BarcodeDetector === 'function') {
+      try {
+        const bmp = await createImageBitmap(fajl);
+        try {
+          const det = new window.BarcodeDetector({ formats: ['qr_code'] });
+          const kodovi = await det.detect(bmp);
+          for (const k of kodovi) {
+            const par = izvuciQrIzTeksta(k.rawValue);
+            if (par) {
+              await primeniPrepoznatQr(par);
+              return;
+            }
+          }
+        } finally {
+          if (bmp && bmp.close) bmp.close();
+        }
+      } catch {}
+    }
+
+    // 2. Rezerva preko PC servera (/api/procitaj-qr u memoriji) za iOS Safari / desktop pregledače
+    try {
+      const manjiBlob = await pripremiSlikuZaQrServer(fajl);
+      const r = await apiPoziv('/api/procitaj-qr', {
+        method: 'POST',
+        headers: { 'Content-Type': manjiBlob.type || 'image/png' },
+        body: manjiBlob
+      });
+      const j = await r.json();
+      if (r.ok && j.ok && j.tim && j.kod) {
+        await primeniPrepoznatQr({ tim: j.tim, kod: j.kod });
+        return;
+      }
+      errBox.textContent = (j && j.poruka) || 'QR kod tima nije prepoznat na slici.';
+      errBox.hidden = false;
+    } catch {
+      errBox.textContent = 'QR kod nije prepoznat u pregledaču, a PC server nije dostupan.';
+      errBox.hidden = false;
+    }
+  }
+
+  async function pokreniQrKameru() {
+    if (qrKameraStream) {
+      zaustaviQrKameru();
+      return;
+    }
+    let podrzavaUzivo = false;
+    if (typeof window.BarcodeDetector === 'function' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        if (typeof window.BarcodeDetector.getSupportedFormats === 'function') {
+          const fmt = await window.BarcodeDetector.getSupportedFormats();
+          podrzavaUzivo = Array.isArray(fmt) && fmt.includes('qr_code');
+        } else {
+          podrzavaUzivo = true;
+        }
+      } catch {}
+    }
+    if (!podrzavaUzivo) {
+      document.getElementById('inp-qr-snap').click();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+      qrKameraStream = stream;
+      const vid = document.getElementById('qr-cam-video');
+      const box = document.getElementById('qr-cam-box');
+      vid.srcObject = stream;
+      box.hidden = false;
+      await vid.play();
+
+      const det = new window.BarcodeDetector({ formats: ['qr_code'] });
+      let uToku = false;
+      qrKameraTajmer = setInterval(async () => {
+        if (uToku || !qrKameraStream || vid.readyState < 2) return;
+        uToku = true;
+        try {
+          const kodovi = await det.detect(vid);
+          for (const k of kodovi) {
+            const par = izvuciQrIzTeksta(k.rawValue);
+            if (par) {
+              await primeniPrepoznatQr(par);
+              break;
+            }
+          }
+        } catch {} finally {
+          uToku = false;
+        }
+      }, 220);
+    } catch {
+      zaustaviQrKameru();
+      document.getElementById('inp-qr-snap').click();
+    }
   }
 
   // --- Jedinstveni upravljač panelima (uvek najviše jedan otvoren!) ---
   const SVI_PANELI = ['modal-login', 'modal-info', 'modal-composer', 'modal-detail', 'modal-profile'];
 
   function otvoriPanel(id) {
+    if (id !== 'modal-login') zaustaviQrKameru();
     for (const pid of SVI_PANELI) {
       const el = document.getElementById(pid);
       if (el) el.hidden = pid !== id;
@@ -315,6 +518,7 @@
 
   function zatvoriSvePanele() {
     zaustaviSnimanjeZvuka(true);
+    zaustaviQrKameru();
     for (const pid of SVI_PANELI) {
       const el = document.getElementById(pid);
       if (el) el.hidden = true;
@@ -1380,6 +1584,31 @@
     };
     document.getElementById('btn-open-composer').onclick = otvoriKompozitor;
     document.getElementById('btn-submit-login').onclick = izvrsiPrijavu;
+    document.getElementById('btn-scan-qr-cam').onclick = pokreniQrKameru;
+    document.getElementById('btn-stop-qr-cam').onclick = zaustaviQrKameru;
+    document.getElementById('inp-qr-image').onchange = async e => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) await dekodirajQrIzFajla(f);
+    };
+    document.getElementById('inp-qr-snap').onchange = async e => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) await dekodirajQrIzFajla(f);
+    };
+
+    document.getElementById('btn-transfer-session').onclick = async () => {
+      const linkPrenosa = napraviLinkPrenosa();
+      if (!linkPrenosa) return;
+      try {
+        await navigator.clipboard.writeText(linkPrenosa);
+        toast(STANJE.jezik === 'en'
+          ? 'Transfer link copied! Paste it into Chrome or Safari (uses the same team seat).'
+          : 'Link za prenos prijave je kopiran! Otvori Chrome ili Safari i nalepi ga u adresnu traku.');
+      } catch {
+        prompt('Kopiraj link i nalepi u Chrome ili Safari:', linkPrenosa);
+      }
+    };
 
     document.getElementById('btn-copy-qr-link').onclick = async () => {
       const qr = STANJE.pendingQr || {
@@ -1466,7 +1695,8 @@
 
   // --- Inicijalizacija ---
   async function start() {
-    STANJE.pendingQr = procitajQrIzUrl();
+    const prenetaPrijava = procitajPrenosIzUrl();
+    STANJE.pendingQr = prenetaPrijava ? null : procitajQrIzUrl();
     poveziDogadjaje();
     primeniJezik();
     inicijalizujMapu();
@@ -1494,7 +1724,10 @@
               zauzeto: j.zauzeto,
               limit: j.limit
             }));
-            pokreniGps(false);
+            if (prenetaPrijava) {
+              toast(`${j.tim} · ${j.nadimak || j.oznaka} (isto mesto preneto)`);
+            }
+            pokreniGps(prenetaPrijava);
           } else if (r.status === 401) {
             sacuvajSesiju(null);
             if (STANJE.pendingQr) await pripremiPrijavuPanel();
