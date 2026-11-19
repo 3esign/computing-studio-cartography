@@ -1513,11 +1513,12 @@
 
   function napraviPotpisPrikaza(zapisi, m2) {
     const limit = Math.min(zapisi.length, STANJE.dnevnikPrikazano);
-    const delovi = [`${STANJE.jezik}|${STANJE.filter}|${m2}|${zapisi.length}|${limit}`];
+    const delovi = [`${STANJE.jezik}|${STANJE.filter}|${STANJE.apiBaza || ''}|${m2}|${zapisi.length}|${limit}`];
     for (let i = 0; i < limit; i++) {
       const z = zapisi[i];
       const pr = (z.prilozi || []).map(p => `${p.id || 'L'}:${p.vrsta}:${p.obrada_status || ''}:${p.url || ''}`).join(',');
-      delovi.push(`${z.id}|${z.uuid_klijenta || ''}|${z.uTelefonu ? 1 : 0}|${z.trajna_greska || ''}|${z.tim}|${z.autor}|${z.vreme}|${(z.tekst || '').length}|${pr}`);
+      const kat = (z.kategorije || []).join(',');
+      delovi.push(`${z.id}|${z.uuid_klijenta || ''}|${z.uTelefonu ? 1 : 0}|${z.trajna_greska || ''}|${z.tim}|${z.autor}|${z.vreme}|${kat}|${z.tekst || ''}|${pr}`);
     }
     return delovi.join('~');
   }
@@ -2211,11 +2212,16 @@
         const r = await apiPoziv('/api/ja', { method: 'GET' });
         const j = await r.json();
         if (r.ok && j && j.ok && STANJE.sesija) {
+          STANJE.sesija.uredjaj_id = j.uredjaj_id || STANJE.sesija.uredjaj_id || 0;
           STANJE.sesija.zauzeto = j.zauzeto;
           STANJE.sesija.limit = j.limit;
           STANJE.sesija.oznaka = j.oznaka || STANJE.sesija.oznaka;
           sacuvajSesiju(STANJE.sesija);
           ispisiRezime();
+        } else if (r.status === 401) {
+          sacuvajSesiju(null);
+          zatvoriSvePanele();
+          toast((j && j.poruka) || 'Mesto za ovaj uređaj je oslobođeno. Skeniraj ponovo QR kod tima.');
         }
       } catch {}
     };
@@ -2507,6 +2513,7 @@
             sessionStorage.removeItem(SS_PENDING_QR);
             STANJE.pendingQr = null;
             sacuvajSesiju(Object.assign({}, STANJE.sesija, {
+              uredjaj_id: j.uredjaj_id || STANJE.sesija.uredjaj_id || 0,
               nadimak: j.nadimak || STANJE.sesija.nadimak || '',
               oznaka: j.oznaka || STANJE.sesija.oznaka || '',
               zauzeto: j.zauzeto,
