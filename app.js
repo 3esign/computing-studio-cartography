@@ -1210,7 +1210,43 @@
   }
 
   // --- Sinhronizacija offline reda sa PC serverom (otporna na „otrovnu stavku“ tako da 4xx greška na #1 nikad ne blokira #2..#N!) ---
+  // iOS/Safari 26.5+ (WebKit 319985): Blob pročitan iz IndexedDB-a, dodat pravo u FormData, ode kao prazno telo zahteva.
+  // Zato se svaki prilog pre slanja pročita u memoriju i šalje kao nov Blob.
+  async function blobUMemoriju(blob, mime) {
+    let bajtovi;
+    if (blob && typeof blob.arrayBuffer === 'function') {
+      bajtovi = await blob.arrayBuffer();
+    } else {
+      bajtovi = await new Response(blob).arrayBuffer();
+    }
+    return new Blob([bajtovi], { type: (blob && blob.type) || mime || 'application/octet-stream' });
+  }
+
+  // Odbijanje zbog praznog tela nije greška zapisa: prepoznaje se po šifri novog servera ili po poruci starog.
+  function jeGreskaPraznogTela(stavka) {
+    if (!stavka || !stavka.trajna_greska) return false;
+    return !!stavka.prazno_telo || (Number(stavka.status_greske) === 400 && String(stavka.trajna_greska).includes('uuid_klijenta'));
+  }
+  const MAKS_AUTO_POKUSAJA_PRAZNOG_TELA = 3;
+
   async function posaljiJedanIzReda(stavka) {
+    const pril = stavka.prilozi || [];
+    const blobovi = [];
+    try {
+      for (let i = 0; i < pril.length; i++) {
+        const b = await blobUMemoriju(pril[i].blob, pril[i].mime);
+        if (pril[i].blob && pril[i].blob.size > 0 && b.size === 0) throw new Error('prazan prilog');
+        blobovi.push(b);
+      }
+    } catch (e) {
+      stavka.trajna_greska = STANJE.jezik === 'en'
+        ? 'An attachment could not be read from phone storage. The entry stays on the phone; tap Retry.'
+        : 'Prilog nije mogao da se pročita iz memorije telefona. Zapis ostaje u telefonu; dodirni „Probaj opet“.';
+      stavka.status_greske = 0;
+      await idbUpisiURed(stavka);
+      return { ishod: 'trajna_greska', poruka: stavka.trajna_greska };
+    }
+
     const fd = new FormData();
     fd.append('uuid_klijenta', stavka.uuid_klijenta);
     fd.append('nedelja', String(stavka.nedelja || 1));
@@ -1223,13 +1259,12 @@
     fd.append('nadimak', stavka.nadimak || '');
     fd.append('tekst', stavka.tekst || '');
 
-    const pril = stavka.prilozi || [];
     for (let i = 0; i < pril.length; i++) {
       const p = pril[i];
       fd.append(`sirina_${i}`, String(p.sirina || 0));
       fd.append(`visina_${i}`, String(p.visina || 0));
       fd.append(`trajanje_${i}`, String(p.trajanje || 0));
-      fd.append(`fajl_${i}`, p.blob, p.ime || `prilog-${i}`);
+      fd.append(`fajl_${i}`, blobovi[i], p.ime || `prilog-${i}`);
     }
 
     const r = await apiPoziv('/api/zapisi', { method: 'POST', body: fd });
@@ -1248,6 +1283,8 @@
     if (r.status === 400 || r.status === 403 || r.status === 413 || r.status === 422) {
       stavka.trajna_greska = (j && j.poruka) || `Server je odbio zapis (${r.status}).`;
       stavka.status_greske = r.status;
+      if (j && j.kod_greske === 'PRAZNO_TELO') stavka.prazno_telo = true;
+      else delete stavka.prazno_telo;
       await idbUpisiURed(stavka);
       return { ishod: 'trajna_greska', poruka: stavka.trajna_greska };
     }
@@ -1277,10 +1314,15 @@
           }
           const sortirano = [...STANJE.lokalniRed].sort((a, b) => String(a.vreme_telefona).localeCompare(String(b.vreme_telefona)));
           for (const st of sortirano) {
-            if (st.trajna_greska && !ukljuciOdbijene) continue;
-            if (st.trajna_greska && ukljuciOdbijene) {
+            // Zapisi odbijeni zbog praznog tela šalju se sami ponovo (najviše nekoliko puta), bez dodira studenta.
+            const autoOpet = !ukljuciOdbijene && jeGreskaPraznogTela(st)
+              && (Number(st.auto_pokusaja) || 0) < MAKS_AUTO_POKUSAJA_PRAZNOG_TELA;
+            if (st.trajna_greska && !ukljuciOdbijene && !autoOpet) continue;
+            if (st.trajna_greska) {
+              if (autoOpet) st.auto_pokusaja = (Number(st.auto_pokusaja) || 0) + 1;
               delete st.trajna_greska;
               delete st.status_greske;
+              delete st.prazno_telo;
             }
             try {
               const rez = await posaljiJedanIzReda(st);
