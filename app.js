@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-20.2';
+  const VERZIJA_APP = '2026-11-20.3';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -1295,16 +1295,88 @@
   // Brojač je vezan za izdanje (polje auto_pokusaja_v2): zapisi koje je prethodno izdanje već iscrpelo dobijaju nove pokušaje.
   const MAKS_AUTO_POKUSAJA_PRAZNOG_TELA = 3;
 
+  // --- Mali izveštaj posle neuspelog slanja (izdanje 2026-11-20.3) ---
+  // Ide kao običan JSON bez priloga, pa ga greška pregledača sa praznim telom ne pogađa. Ne nosi tekst, GPS ni sadržaj zapisa:
+  // samo verziju aplikacije, broj zapisa u redu, veličine priloga i ishod svakog koraka slanja. Server ga piše u audit.
+  const izvestajPokusaji = [];
+  let izvestajPoslatoPuta = 0;
+  let izvestajPoslednjiMs = 0;
+  const MAKS_IZVESTAJA_PO_OTVARANJU = 10;
+  const RAZMAK_IZVESTAJA_MS = 15000;
+
+  function zabeleziZaIzvestaj(dn) {
+    izvestajPokusaji.push(dn);
+    if (izvestajPokusaji.length > 12) izvestajPokusaji.splice(0, izvestajPokusaji.length - 12);
+  }
+
+  function opisGreskeSlanja(e) {
+    return 'mreza:' + String((e && e.name) || 'Error') + ' ' + String((e && e.message) || '').slice(0, 70);
+  }
+
+  async function posaljiIzvestajSlanja() {
+    if (izvestajPokusaji.length === 0) return;
+    if (!STANJE.sesija || !STANJE.sesija.tajna) return;
+    if (izvestajPoslatoPuta >= MAKS_IZVESTAJA_PO_OTVARANJU) { izvestajPokusaji.length = 0; return; }
+    if (Date.now() - izvestajPoslednjiMs < RAZMAK_IZVESTAJA_MS) return;
+    const pokusaji = izvestajPokusaji.splice(0, izvestajPokusaji.length);
+    izvestajPoslatoPuta++;
+    izvestajPoslednjiMs = Date.now();
+    let samostalno = false;
+    try { samostalno = !!navigator.standalone || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches); } catch {}
+    const telo = {
+      verzija_app: VERZIJA_APP,
+      u_redu: (STANJE.lokalniRed || []).length,
+      na_mrezi: navigator.onLine === false ? 'ne' : 'da',
+      veza: String((navigator.connection && navigator.connection.effectiveType) || ''),
+      samostalno: samostalno ? 'da' : 'ne',
+      sw: navigator.serviceWorker && navigator.serviceWorker.controller ? 'da' : 'ne',
+      vidljivo: String(document.visibilityState || ''),
+      pokusaji
+    };
+    try {
+      await apiPoziv('/api/izvestaj-slanja', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(telo)
+      }, false);
+    } catch {}
+  }
+
+  // Da li server baš sada odgovara na mali zahtev. Razdvaja „nema veze“ od „veza radi, a slanje zapisa pregledač prijavi kao grešku“.
+  async function serverOdgovaraSada() {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const tajmer = ctrl ? setTimeout(() => ctrl.abort(), 6000) : null;
+    try {
+      const r = await apiPoziv('/api/zdravlje', Object.assign({ method: 'GET', cache: 'no-store' }, ctrl ? { signal: ctrl.signal } : {}), false);
+      return String(r.status);
+    } catch (e) {
+      return opisGreskeSlanja(e);
+    } finally {
+      if (tajmer) clearTimeout(tajmer);
+    }
+  }
+
   async function posaljiJedanIzReda(stavka) {
     const pril = stavka.prilozi || [];
     const bajtovi = [];
+    const dn = {
+      uuid_kraj: String(stavka.uuid_klijenta || '').slice(-8),
+      priloga: pril.length,
+      velicine: pril.map(p => (p && p.blob ? Number(p.blob.size) || 0 : -1)).join(','),
+      tipovi: pril.map(tipPriloga).join(',')
+    };
+    let t0 = Date.now();
     try {
       for (let i = 0; i < pril.length; i++) {
         const ab = await procitajBajtovePriloga(pril[i].blob);
-        if (pril[i].blob && pril[i].blob.size > 0 && ab.byteLength === 0) throw new Error('prazan prilog');
         bajtovi.push(ab);
+        if (pril[i].blob && pril[i].blob.size > 0 && ab.byteLength === 0) throw new Error('prazan prilog');
       }
     } catch (e) {
+      dn.procitano = bajtovi.map(b => b.byteLength).join(',');
+      dn.citanje_ms = Date.now() - t0;
+      dn.ishod = 'citanje:' + String((e && e.name) || 'Error') + ' ' + String((e && e.message) || '').slice(0, 20);
+      zabeleziZaIzvestaj(dn);
       stavka.trajna_greska = STANJE.jezik === 'en'
         ? 'An attachment could not be read from phone storage. The entry stays on the phone; tap Retry.'
         : 'Prilog nije mogao da se pročita iz memorije telefona. Zapis ostaje u telefonu; dodirni „Probaj opet“.';
@@ -1312,9 +1384,12 @@
       await idbUpisiURed(stavka);
       return { ishod: 'trajna_greska', poruka: stavka.trajna_greska };
     }
+    dn.procitano = bajtovi.map(b => b.byteLength).join(',');
+    dn.citanje_ms = Date.now() - t0;
 
     const polja = poljaZapisaZaSlanje(stavka);
     const upit = put => '/api/zapisi?v=' + encodeURIComponent(VERZIJA_APP) + '&put=' + put;
+    const opisOdgovora = (odg, telo) => String(odg.status) + (telo && telo.kod_greske ? ' ' + telo.kod_greske : '');
 
     // Prvi put: FormData sa Blob-ovima iz memorije.
     let fd = new FormData();
@@ -1322,17 +1397,56 @@
     for (let i = 0; i < pril.length; i++) {
       fd.append(`fajl_${i}`, new Blob([bajtovi[i]], { type: tipPriloga(pril[i]) }), pril[i].ime || `prilog-${i}`);
     }
-    let r = await apiPoziv(upit('fd'), { method: 'POST', body: fd });
-    fd = null;
+    let r = null;
     let j = null;
-    try { j = await r.json(); } catch {}
-
-    // Rezervni put: server je dobio prazno telo, pa isti zapis ide ponovo kao niz bajtova.
-    if (jeOdgovorPraznogTela(r.status, j)) {
-      const rucno = sklopiMultipartRucno(polja, pril, bajtovi);
-      r = await apiPoziv(upit('rucno'), { method: 'POST', headers: { 'Content-Type': rucno.tip }, body: rucno.telo });
-      j = null;
+    let greskaFd = null;
+    t0 = Date.now();
+    try {
+      r = await apiPoziv(upit('fd'), { method: 'POST', body: fd });
       try { j = await r.json(); } catch {}
+      dn.fd = opisOdgovora(r, j);
+    } catch (e) {
+      greskaFd = e;
+      dn.fd = opisGreskeSlanja(e);
+    }
+    dn.fd_ms = Date.now() - t0;
+    fd = null;
+
+    // Rezervni put (multipart sklopljen ručno kao niz bajtova, bez FormData i Blob-a) ide u dva slučaja:
+    //  a) server je odgovorio da je telo stiglo prazno;
+    //  b) pregledač je FormData slanje prijavio kao mrežnu grešku, a server u istom trenutku odgovara na mali zahtev.
+    //     Kad veze stvarno nema, ili je istekao naš rok slanja, rezervni put se ne proba i zapis čeka sledeći krug kao i do sada.
+    let putRucno = '';
+    if (r && jeOdgovorPraznogTela(r.status, j)) {
+      putRucno = 'rucno';
+    } else if (greskaFd) {
+      const istekaoRok = greskaFd.name === 'AbortError';
+      dn.ping = istekaoRok ? 'rok' : await serverOdgovaraSada();
+      if (dn.ping !== '200') {
+        // Obična mreža bez veze: bez izveštaja (ne bi ni stigao), osim kad je istekao rok dok veza postoji.
+        if (istekaoRok) { dn.ishod = 'rok'; zabeleziZaIzvestaj(dn); }
+        throw greskaFd;
+      }
+      putRucno = 'rucno-m';
+    }
+
+    if (putRucno) {
+      t0 = Date.now();
+      r = null;
+      j = null;
+      try {
+        const rucno = sklopiMultipartRucno(polja, pril, bajtovi);
+        r = await apiPoziv(upit(putRucno), { method: 'POST', headers: { 'Content-Type': rucno.tip }, body: rucno.telo });
+        try { j = await r.json(); } catch {}
+        dn.rucno = opisOdgovora(r, j);
+        dn.rucno_ms = Date.now() - t0;
+      } catch (e) {
+        dn.rucno = opisGreskeSlanja(e);
+        dn.rucno_ms = Date.now() - t0;
+        dn.ishod = 'mreza';
+        zabeleziZaIzvestaj(dn);
+        throw e;
+      }
     }
 
     if (r.status === 401) {
@@ -1342,6 +1456,7 @@
     if (r.ok && j && j.ok) {
       await idbObrisiIzReda(stavka.uuid_klijenta);
       pripremljeniIzvoz.delete(stavka.uuid_klijenta);
+      if (putRucno) { dn.ishod = 'poslato'; zabeleziZaIzvestaj(dn); }
       return { ishod: 'poslato' };
     }
     // Trajno odbijanje konkretne stavke (400/403/413/422): zabeleži grešku na toj stavci i NASTAVI slanje ostalih zapisa!
@@ -1351,9 +1466,12 @@
       if (j && j.kod_greske === 'PRAZNO_TELO') stavka.prazno_telo = true;
       else delete stavka.prazno_telo;
       await idbUpisiURed(stavka);
+      dn.ishod = 'odbijeno ' + r.status;
+      zabeleziZaIzvestaj(dn);
       return { ishod: 'trajna_greska', poruka: stavka.trajna_greska };
     }
     // Prolazni kvar (408/429/5xx): zadrži u redu za automatsko ponovno slanje
+    if (putRucno) { dn.ishod = 'prolazno ' + r.status; zabeleziZaIzvestaj(dn); }
     throw new Error((j && j.poruka) || 'Privremeni prekid veze.');
   }
 
@@ -1494,6 +1612,7 @@
 
         STANJE.lokalniRed = await idbSviIzReda();
         osveziStatusTraku();
+        posaljiIzvestajSlanja().catch(() => {});
         if (!mrezniPrekid || poslatoBarJedno) {
           await ucitajStanjeSaServera(false);
         } else {
