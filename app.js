@@ -2,6 +2,8 @@
 (function () {
   'use strict';
 
+  // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
+  const VERZIJA_APP = '2026-11-20.2';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -115,6 +117,7 @@
       uTelefonuOznaka: 'Sačuvano u telefonu · čeka slanje',
       otkaziRed: 'Otkaži slanje',
       probajOpet: 'Probaj opet',
+      sacuvajKopiju: 'Sačuvaj kopiju',
       urediMoj: 'Uredi',
       obrisiMoj: 'Obriši',
       videoObrada: '🎬 Video se optimizuje za sve uređaje…',
@@ -147,6 +150,7 @@
       uTelefonuOznaka: 'Saved on phone · waiting to sync',
       otkaziRed: 'Cancel queued',
       probajOpet: 'Retry',
+      sacuvajKopiju: 'Save a copy',
       urediMoj: 'Edit',
       obrisiMoj: 'Delete',
       videoObrada: '🎬 Optimizing video for all devices…',
@@ -337,7 +341,8 @@
       zaglavlja.Authorization = 'Bearer ' + STANJE.sesija.tajna;
     }
     const jeVelikoSlanje = (typeof FormData !== 'undefined' && opcije.body instanceof FormData)
-      || (typeof Blob !== 'undefined' && opcije.body instanceof Blob);
+      || (typeof Blob !== 'undefined' && opcije.body instanceof Blob)
+      || (typeof ArrayBuffer !== 'undefined' && (opcije.body instanceof ArrayBuffer || ArrayBuffer.isView(opcije.body)));
     const rokMs = jeVelikoSlanje ? 90000 : 15000;
     const ctrl = !opcije.signal && typeof AbortController !== 'undefined' ? new AbortController() : null;
     const tajmer = ctrl ? setTimeout(() => ctrl.abort(), rokMs) : null;
@@ -1211,32 +1216,93 @@
 
   // --- Sinhronizacija offline reda sa PC serverom (otporna na „otrovnu stavku“ tako da 4xx greška na #1 nikad ne blokira #2..#N!) ---
   // iOS/Safari 26.5+ (WebKit 319985): Blob pročitan iz IndexedDB-a, dodat pravo u FormData, ode kao prazno telo zahteva.
-  // Zato se svaki prilog pre slanja pročita u memoriju i šalje kao nov Blob.
-  async function blobUMemoriju(blob, mime) {
-    let bajtovi;
-    if (blob && typeof blob.arrayBuffer === 'function') {
-      bajtovi = await blob.arrayBuffer();
-    } else {
-      bajtovi = await new Response(blob).arrayBuffer();
+  // Zato se svaki prilog pre slanja pročita u memoriju (ArrayBuffer). Prvi put slanja je FormData sa novim Blob-om iz tih bajtova;
+  // ako server i tada javi prazno telo, isti zapis se odmah šalje rezervnim putem: multipart sklopljen ručno kao niz bajtova,
+  // bez FormData i bez Blob-a, pa greška pregledača nema na čemu da se okine.
+  async function procitajBajtovePriloga(blob) {
+    if (!blob) return new ArrayBuffer(0);
+    if (typeof blob.arrayBuffer === 'function') {
+      try { return await blob.arrayBuffer(); } catch {}
     }
-    return new Blob([bajtovi], { type: (blob && blob.type) || mime || 'application/octet-stream' });
+    try { return await new Response(blob).arrayBuffer(); } catch {}
+    return await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(fr.error || new Error('čitanje priloga'));
+      fr.readAsArrayBuffer(blob);
+    });
+  }
+
+  function poljaZapisaZaSlanje(stavka) {
+    const pril = stavka.prilozi || [];
+    const polja = [
+      ['uuid_klijenta', stavka.uuid_klijenta],
+      ['nedelja', String(stavka.nedelja || 1)],
+      ['tema', stavka.tema || 'subjektivni-dozivljaj'],
+      ['kategorije', JSON.stringify(stavka.kategorije || [])],
+      ['lat', String(stavka.lat)],
+      ['lon', String(stavka.lon)],
+      ['tacnost_m', String(stavka.tacnost_m)],
+      ['vreme_telefona', stavka.vreme_telefona],
+      ['nadimak', stavka.nadimak || ''],
+      ['tekst', stavka.tekst || '']
+    ];
+    for (let i = 0; i < pril.length; i++) {
+      polja.push([`sirina_${i}`, String(pril[i].sirina || 0)]);
+      polja.push([`visina_${i}`, String(pril[i].visina || 0)]);
+      polja.push([`trajanje_${i}`, String(pril[i].trajanje || 0)]);
+    }
+    return polja;
+  }
+
+  function tipPriloga(p) {
+    return String((p && p.blob && p.blob.type) || (p && p.mime) || 'application/octet-stream').replace(/[\r\n]/g, '');
+  }
+
+  // Ručno sklopljen multipart/form-data (RFC 7578) kao jedan Uint8Array.
+  function sklopiMultipartRucno(polja, pril, bajtovi) {
+    let nasumicno = '';
+    for (let i = 0; i < 4; i++) nasumicno += Math.random().toString(36).slice(2, 10);
+    const granica = '----uzRucno' + nasumicno;
+    const enc = new TextEncoder();
+    const delovi = [];
+    for (const [ime, vrednost] of polja) {
+      delovi.push(enc.encode(`--${granica}\r\nContent-Disposition: form-data; name="${ime}"\r\n\r\n${vrednost == null ? '' : String(vrednost)}\r\n`));
+    }
+    for (let i = 0; i < pril.length; i++) {
+      const imeFajla = String(pril[i].ime || `prilog-${i}`).replace(/["\r\n\\]/g, '_');
+      delovi.push(enc.encode(`--${granica}\r\nContent-Disposition: form-data; name="fajl_${i}"; filename="${imeFajla}"\r\nContent-Type: ${tipPriloga(pril[i])}\r\n\r\n`));
+      delovi.push(new Uint8Array(bajtovi[i]));
+      delovi.push(enc.encode('\r\n'));
+    }
+    delovi.push(enc.encode(`--${granica}--\r\n`));
+    let ukupno = 0;
+    for (const d of delovi) ukupno += d.length;
+    const telo = new Uint8Array(ukupno);
+    let poz = 0;
+    for (const d of delovi) { telo.set(d, poz); poz += d.length; }
+    return { telo, tip: 'multipart/form-data; boundary=' + granica };
   }
 
   // Odbijanje zbog praznog tela nije greška zapisa: prepoznaje se po šifri novog servera ili po poruci starog.
+  function jeOdgovorPraznogTela(status, j) {
+    return status === 400 && !!j && (j.kod_greske === 'PRAZNO_TELO' || String(j.poruka || '').includes('uuid_klijenta'));
+  }
   function jeGreskaPraznogTela(stavka) {
     if (!stavka || !stavka.trajna_greska) return false;
     return !!stavka.prazno_telo || (Number(stavka.status_greske) === 400 && String(stavka.trajna_greska).includes('uuid_klijenta'));
   }
+  // Brojač je vezan za izdanje (polje auto_pokusaja_v2): zapisi koje je prethodno izdanje već iscrpelo dobijaju nove pokušaje.
   const MAKS_AUTO_POKUSAJA_PRAZNOG_TELA = 3;
 
   async function posaljiJedanIzReda(stavka) {
     const pril = stavka.prilozi || [];
-    const blobovi = [];
+    const bajtovi = [];
     try {
       for (let i = 0; i < pril.length; i++) {
-        const b = await blobUMemoriju(pril[i].blob, pril[i].mime);
-        if (pril[i].blob && pril[i].blob.size > 0 && b.size === 0) throw new Error('prazan prilog');
-        blobovi.push(b);
+        const ab = await procitajBajtovePriloga(pril[i].blob);
+        if (pril[i].blob && pril[i].blob.size > 0 && ab.byteLength === 0) throw new Error('prazan prilog');
+        bajtovi.push(ab);
       }
     } catch (e) {
       stavka.trajna_greska = STANJE.jezik === 'en'
@@ -1247,29 +1313,27 @@
       return { ishod: 'trajna_greska', poruka: stavka.trajna_greska };
     }
 
-    const fd = new FormData();
-    fd.append('uuid_klijenta', stavka.uuid_klijenta);
-    fd.append('nedelja', String(stavka.nedelja || 1));
-    fd.append('tema', stavka.tema || 'subjektivni-dozivljaj');
-    fd.append('kategorije', JSON.stringify(stavka.kategorije || []));
-    fd.append('lat', String(stavka.lat));
-    fd.append('lon', String(stavka.lon));
-    fd.append('tacnost_m', String(stavka.tacnost_m));
-    fd.append('vreme_telefona', stavka.vreme_telefona);
-    fd.append('nadimak', stavka.nadimak || '');
-    fd.append('tekst', stavka.tekst || '');
+    const polja = poljaZapisaZaSlanje(stavka);
+    const upit = put => '/api/zapisi?v=' + encodeURIComponent(VERZIJA_APP) + '&put=' + put;
 
+    // Prvi put: FormData sa Blob-ovima iz memorije.
+    let fd = new FormData();
+    for (const [ime, vrednost] of polja) fd.append(ime, vrednost);
     for (let i = 0; i < pril.length; i++) {
-      const p = pril[i];
-      fd.append(`sirina_${i}`, String(p.sirina || 0));
-      fd.append(`visina_${i}`, String(p.visina || 0));
-      fd.append(`trajanje_${i}`, String(p.trajanje || 0));
-      fd.append(`fajl_${i}`, blobovi[i], p.ime || `prilog-${i}`);
+      fd.append(`fajl_${i}`, new Blob([bajtovi[i]], { type: tipPriloga(pril[i]) }), pril[i].ime || `prilog-${i}`);
     }
-
-    const r = await apiPoziv('/api/zapisi', { method: 'POST', body: fd });
+    let r = await apiPoziv(upit('fd'), { method: 'POST', body: fd });
+    fd = null;
     let j = null;
     try { j = await r.json(); } catch {}
+
+    // Rezervni put: server je dobio prazno telo, pa isti zapis ide ponovo kao niz bajtova.
+    if (jeOdgovorPraznogTela(r.status, j)) {
+      const rucno = sklopiMultipartRucno(polja, pril, bajtovi);
+      r = await apiPoziv(upit('rucno'), { method: 'POST', headers: { 'Content-Type': rucno.tip }, body: rucno.telo });
+      j = null;
+      try { j = await r.json(); } catch {}
+    }
 
     if (r.status === 401) {
       sacuvajSesiju(null);
@@ -1277,6 +1341,7 @@
     }
     if (r.ok && j && j.ok) {
       await idbObrisiIzReda(stavka.uuid_klijenta);
+      pripremljeniIzvoz.delete(stavka.uuid_klijenta);
       return { ishod: 'poslato' };
     }
     // Trajno odbijanje konkretne stavke (400/403/413/422): zabeleži grešku na toj stavci i NASTAVI slanje ostalih zapisa!
@@ -1290,6 +1355,90 @@
     }
     // Prolazni kvar (408/429/5xx): zadrži u redu za automatsko ponovno slanje
     throw new Error((j && j.poruka) || 'Privremeni prekid veze.');
+  }
+
+  // --- Kopija neposlatog zapisa van aplikacije (deljenje ili preuzimanje), ako slanje na server ne uspeva ---
+  const pripremljeniIzvoz = new Map();
+
+  async function pripremiIzvozZapisa(st) {
+    const pril = st.prilozi || [];
+    const osnova = ('zapis-' + String(st.tim || 'tim') + '-' + String(st.vreme_telefona || '').replace(/[^0-9T]/g, '').slice(0, 13)).replace(/[^A-Za-z0-9-]/g, '');
+    const mediji = [];
+    let neprocitano = 0;
+    for (let i = 0; i < pril.length; i++) {
+      try {
+        const ab = await procitajBajtovePriloga(pril[i].blob);
+        if (!ab || ab.byteLength === 0) throw new Error('prazan prilog');
+        const ime = osnova + '-' + (i + 1) + '-' + String(pril[i].ime || 'prilog').replace(/[^A-Za-z0-9._-]/g, '_').slice(-40);
+        mediji.push(new File([ab], ime, { type: tipPriloga(pril[i]) }));
+      } catch { neprocitano++; }
+    }
+    const tekst = [
+      'Urbani žurnal · neposlat zapis',
+      'Tim: ' + (st.tim || ''),
+      'Autor: ' + (st.nadimak || st.oznaka_uredjaja || ''),
+      'Vreme telefona: ' + (st.vreme_telefona || ''),
+      'GPS: ' + st.lat + ', ' + st.lon + ' (±' + Math.round(Number(st.tacnost_m) || 0) + ' m)',
+      'Nedelja: ' + (st.nedelja || 1),
+      'Kategorije: ' + (st.kategorije || []).join(', '),
+      'Priloga: ' + pril.length + (neprocitano ? ' (nepročitano: ' + neprocitano + ')' : ''),
+      'ID zapisa: ' + st.uuid_klijenta,
+      '',
+      st.tekst || ''
+    ].join('\n');
+    const opis = new File([tekst], osnova + '.txt', { type: 'text/plain' });
+    return { naslov: osnova, tekst, mediji, opis, neprocitano };
+  }
+
+  async function sacuvajKopijuZapisa(uuid) {
+    const st = (STANJE.lokalniRed || []).find(x => x.uuid_klijenta === uuid);
+    if (!st) return;
+    const en = STANJE.jezik === 'en';
+    let paket = pripremljeniIzvoz.get(uuid);
+    try {
+      if (!paket) {
+        toast(en ? 'Preparing a copy…' : 'Pripremam kopiju zapisa…');
+        paket = await pripremiIzvozZapisa(st);
+        pripremljeniIzvoz.set(uuid, paket);
+      }
+    } catch {
+      toast(en ? 'The copy could not be prepared.' : 'Kopija nije mogla da se pripremi.');
+      return;
+    }
+    if (typeof navigator.share === 'function') {
+      const moze = d => { try { return typeof navigator.canShare === 'function' ? navigator.canShare(d) : !d.files; } catch { return false; } };
+      let podaci = null;
+      const sve = paket.mediji.concat([paket.opis]);
+      if (moze({ files: sve })) podaci = { files: sve, title: paket.naslov };
+      else if (paket.mediji.length && moze({ files: paket.mediji })) podaci = { files: paket.mediji, title: paket.naslov, text: paket.tekst };
+      else if (!paket.mediji.length) podaci = { title: paket.naslov, text: paket.tekst };
+      if (podaci) {
+        try {
+          await navigator.share(podaci);
+          return;
+        } catch (e) {
+          if (e && e.name === 'AbortError') return;
+          if (e && e.name === 'NotAllowedError') {
+            // Pregledač traži svež dodir: kopija je već pripremljena, drugi dodir deli odmah.
+            toast(en ? 'The copy is ready. Tap “Save a copy” once more.' : 'Kopija je spremna. Dodirni „Sačuvaj kopiju“ još jednom.');
+            return;
+          }
+        }
+      }
+    }
+    // Bez deljenja (desktop, stariji pregledač): preuzimanje fajlova.
+    for (const fajl of paket.mediji.concat([paket.opis])) {
+      const url = URL.createObjectURL(fajl);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fajl.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      await new Promise(res => setTimeout(res, 350));
+    }
+    toast(en ? 'A copy was downloaded.' : 'Kopija zapisa je preuzeta.');
   }
 
   let aktivniSyncPromis = null;
@@ -1316,10 +1465,10 @@
           for (const st of sortirano) {
             // Zapisi odbijeni zbog praznog tela šalju se sami ponovo (najviše nekoliko puta), bez dodira studenta.
             const autoOpet = !ukljuciOdbijene && jeGreskaPraznogTela(st)
-              && (Number(st.auto_pokusaja) || 0) < MAKS_AUTO_POKUSAJA_PRAZNOG_TELA;
+              && (Number(st.auto_pokusaja_v2) || 0) < MAKS_AUTO_POKUSAJA_PRAZNOG_TELA;
             if (st.trajna_greska && !ukljuciOdbijene && !autoOpet) continue;
             if (st.trajna_greska) {
-              if (autoOpet) st.auto_pokusaja = (Number(st.auto_pokusaja) || 0) + 1;
+              if (autoOpet) st.auto_pokusaja_v2 = (Number(st.auto_pokusaja_v2) || 0) + 1;
               delete st.trajna_greska;
               delete st.status_greske;
               delete st.prazno_telo;
@@ -1361,7 +1510,12 @@
 
   async function ukloniIzLokalnogReda(uuid) {
     if (!uuid) return;
+    const pit = STANJE.jezik === 'en'
+      ? 'This entry exists only on this phone and has not been sent. Delete it for good?'
+      : 'Ovaj zapis postoji samo u ovom telefonu i još nije poslat. Obrisati ga zauvek?';
+    if (!window.confirm(pit)) return;
     await idbObrisiIzReda(uuid);
+    pripremljeniIzvoz.delete(uuid);
     STANJE.lokalniRed = await idbSviIzReda();
     osveziStatusTraku();
     zatvoriSvePanele();
@@ -1638,7 +1792,8 @@
               : `<div class="alert-box warn" style="padding:5px 9px;font-size:11.5px">${esc(t('uTelefonuOznaka'))}</div>`)
           : '';
         const akcijeReda = z.uTelefonu
-          ? `${z.trajna_greska ? `<button type="button" class="link-btn" data-retry-uuid="${esc(z.uuid_klijenta)}">${esc(t('probajOpet'))}</button>` : ''}
+          ? `${z.trajna_greska ? `<button type="button" class="link-btn" data-retry-uuid="${esc(z.uuid_klijenta)}">${esc(t('probajOpet'))}</button>
+             <button type="button" class="link-btn" data-copy-uuid="${esc(z.uuid_klijenta)}">${esc(t('sacuvajKopiju'))}</button>` : ''}
              <button type="button" class="link-btn danger" data-drop-uuid="${esc(z.uuid_klijenta)}">${esc(t('otkaziRed'))}</button>`
           : (jeMojServerZapis(z)
               ? `<button type="button" class="link-btn" data-edit-id="${esc(z.id)}">${esc(t('urediMoj'))}</button>
@@ -1688,6 +1843,9 @@
 
       feed.querySelectorAll('[data-drop-uuid]').forEach(btn => {
         btn.onclick = () => ukloniIzLokalnogReda(btn.getAttribute('data-drop-uuid'));
+      });
+      feed.querySelectorAll('[data-copy-uuid]').forEach(btn => {
+        btn.onclick = () => sacuvajKopijuZapisa(btn.getAttribute('data-copy-uuid'));
       });
       feed.querySelectorAll('[data-retry-uuid]').forEach(btn => {
         btn.onclick = () => sinhronizujRed(true);
@@ -1763,7 +1921,8 @@
       : '';
     const sopstveneAkcijeHtml = z.uTelefonu
       ? `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:6px">
-           ${z.trajna_greska ? `<button type="button" class="link-btn" id="det-retry-q">${esc(t('probajOpet'))}</button>` : ''}
+           ${z.trajna_greska ? `<button type="button" class="link-btn" id="det-retry-q">${esc(t('probajOpet'))}</button>
+           <button type="button" class="link-btn" id="det-copy-q">${esc(t('sacuvajKopiju'))}</button>` : ''}
            <button type="button" class="link-btn danger" id="det-drop-q">${esc(t('otkaziRed'))}</button>
          </div>`
       : (jeMojServerZapis(z)
@@ -1789,6 +1948,8 @@
     });
     const btnDropQ = document.getElementById('det-drop-q');
     if (btnDropQ) btnDropQ.onclick = () => ukloniIzLokalnogReda(z.uuid_klijenta);
+    const btnCopyQ = document.getElementById('det-copy-q');
+    if (btnCopyQ) btnCopyQ.onclick = () => sacuvajKopijuZapisa(z.uuid_klijenta);
     const btnRetryQ = document.getElementById('det-retry-q');
     if (btnRetryQ) btnRetryQ.onclick = () => { zatvoriSvePanele(); sinhronizujRed(true); };
     const btnDelOwn = document.getElementById('det-del-own');
