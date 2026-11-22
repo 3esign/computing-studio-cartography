@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-22.1';
+  const VERZIJA_APP = '2026-11-22.2';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -1582,6 +1582,47 @@
     return bajtovaPriloga(st) >= PRAG_VELIKOG_ZAPISA;
   }
 
+  // --- Budan ekran dok traje veliko slanje ---
+  // Zaključan ekran zamrzne karticu i prekine prenos, pa veliki prilog kreće iznova. Dok se veliki zapis šalje, tražimo da ekran
+  // ostane upaljen (Screen Wake Lock; Safari 16.4+). Gde to nije podržano ili je odbijeno, sve radi kao i bez toga.
+  // Pregledač bravu sam pušta kad kartica ode u pozadinu; po povratku je tražimo ponovo ako slanje još traje.
+  let velikihSlanjaUToku = 0;
+  let bravaEkrana = null;
+  let bravaSeTrazi = false;
+
+  async function drziEkranBudnim() {
+    if (bravaEkrana || bravaSeTrazi || velikihSlanjaUToku === 0) return;
+    if (!navigator.wakeLock || document.visibilityState !== 'visible') return;
+    bravaSeTrazi = true;
+    try {
+      const brava = await navigator.wakeLock.request('screen');
+      brava.addEventListener('release', () => { if (bravaEkrana === brava) bravaEkrana = null; });
+      bravaEkrana = brava;
+      if (velikihSlanjaUToku === 0) pustiEkran();
+    } catch {
+    } finally {
+      bravaSeTrazi = false;
+    }
+  }
+
+  function pustiEkran() {
+    const brava = bravaEkrana;
+    bravaEkrana = null;
+    if (brava) brava.release().catch(() => {});
+  }
+
+  async function posaljiUzBudanEkran(st) {
+    if (!jeVelikiZapis(st)) return posaljiJedanIzReda(st);
+    velikihSlanjaUToku++;
+    drziEkranBudnim();
+    try {
+      return await posaljiJedanIzReda(st);
+    } finally {
+      velikihSlanjaUToku--;
+      if (velikihSlanjaUToku === 0) pustiEkran();
+    }
+  }
+
   let aktivnihTraka = 0;
 
   // Traka vraća funkciju slanja. Poziv dok je krug u toku ne otvara drugi krug: traži još jedan prolaz i vraća isto obećanje.
@@ -1621,7 +1662,7 @@
                 delete st.prazno_telo;
               }
               try {
-                const rez = await posaljiJedanIzReda(st);
+                const rez = await posaljiUzBudanEkran(st);
                 if (rez.ishod === 'poslato') {
                   poslatoBarJedno = true;
                 } else if (rez.ishod === 'auth_pala') {
@@ -2835,6 +2876,7 @@
           osveziGpsPrikaz();
         }
         pokreniGps(false);
+        drziEkranBudnim();
         sinhronizujRed();
         ucitajStanjeSaServera();
       }
