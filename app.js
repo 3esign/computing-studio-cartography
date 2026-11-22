@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-20.3';
+  const VERZIJA_APP = '2026-11-22.1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -129,6 +129,7 @@
       potrebanPrilog: 'Dodaj bar zapažanje u tekstu, fotografiju, zvuk ili video.',
       sacuvanoUzivo: 'Zapis je upisan u Urbani žurnal i vidljiv na mapi!',
       sacuvanoOffline: 'Sačuvano u telefonu! Poslaće se automatski čim server bude dostupan.',
+      saljeSeVeliki: 'Sačuvano u telefonu. Veliki prilog se šalje u pozadini; ostavi aplikaciju otvorenu dok ne stigne.',
       kopirano: 'Link je kopiran! Otvori Safari ili Chrome i nalepi ga u adresnu traku.',
       snimam: s => `Zaustavi (${s}s)`,
       snimiZvuk: 'Snimi zvuk'
@@ -162,6 +163,7 @@
       potrebanPrilog: 'Add at least a text note, photo, sound, or video.',
       sacuvanoUzivo: 'Entry saved to Urban Journal and live on the map!',
       sacuvanoOffline: 'Saved on your phone! Will sync automatically once connected.',
+      saljeSeVeliki: 'Saved on your phone. The large attachment is uploading in the background; keep the app open until it arrives.',
       kopirano: 'Link copied! Open Safari or Chrome and paste it into the address bar.',
       snimam: s => `Stop (${s}s)`,
       snimiZvuk: 'Record sound'
@@ -343,7 +345,7 @@
     const jeVelikoSlanje = (typeof FormData !== 'undefined' && opcije.body instanceof FormData)
       || (typeof Blob !== 'undefined' && opcije.body instanceof Blob)
       || (typeof ArrayBuffer !== 'undefined' && (opcije.body instanceof ArrayBuffer || ArrayBuffer.isView(opcije.body)));
-    const rokMs = jeVelikoSlanje ? 90000 : 15000;
+    const rokMs = opcije.rokMs || (jeVelikoSlanje ? 90000 : 15000);
     const ctrl = !opcije.signal && typeof AbortController !== 'undefined' ? new AbortController() : null;
     const tajmer = ctrl ? setTimeout(() => ctrl.abort(), rokMs) : null;
     try {
@@ -1204,7 +1206,8 @@
       if (uReduPosle && uReduPosle.trajna_greska) {
         toast(uReduPosle.trajna_greska);
       } else {
-        toast(poslato ? t('sacuvanoUzivo') : t('sacuvanoOffline'));
+        const idePozadinom = !poslato && uReduPosle && jeVelikiZapis(uReduPosle) && STANJE.serverDostupan;
+        toast(poslato ? t('sacuvanoUzivo') : t(idePozadinom ? 'saljeSeVeliki' : 'sacuvanoOffline'));
       }
     } catch (e) {
       errEl.textContent = 'Greška pri čuvanju: ' + (e && e.message ? e.message : String(e));
@@ -1356,6 +1359,12 @@
     }
   }
 
+  // Rok jednog slanja raste sa veličinom priloga: 60 s osnove i vreme za prenos pri sporoj vezi (64 KB/s), od 90 s do 20 min.
+  // Fiksnih 90 s je prekidalo video od 58 MB pre kraja prenosa, a svaki novi pokušaj šalje ceo fajl iznova.
+  function rokSlanjaMs(bajtova) {
+    return Math.min(20 * 60000, Math.max(90000, 60000 + Math.ceil(bajtova / 64000) * 1000));
+  }
+
   async function posaljiJedanIzReda(stavka) {
     const pril = stavka.prilozi || [];
     const bajtovi = [];
@@ -1388,6 +1397,7 @@
     dn.citanje_ms = Date.now() - t0;
 
     const polja = poljaZapisaZaSlanje(stavka);
+    const rokMs = rokSlanjaMs(bajtovi.reduce((zbir, b) => zbir + b.byteLength, 0));
     const upit = put => '/api/zapisi?v=' + encodeURIComponent(VERZIJA_APP) + '&put=' + put;
     const opisOdgovora = (odg, telo) => String(odg.status) + (telo && telo.kod_greske ? ' ' + telo.kod_greske : '');
 
@@ -1402,7 +1412,7 @@
     let greskaFd = null;
     t0 = Date.now();
     try {
-      r = await apiPoziv(upit('fd'), { method: 'POST', body: fd });
+      r = await apiPoziv(upit('fd'), { method: 'POST', body: fd, rokMs });
       try { j = await r.json(); } catch {}
       dn.fd = opisOdgovora(r, j);
     } catch (e) {
@@ -1436,7 +1446,7 @@
       j = null;
       try {
         const rucno = sklopiMultipartRucno(polja, pril, bajtovi);
-        r = await apiPoziv(upit(putRucno), { method: 'POST', headers: { 'Content-Type': rucno.tip }, body: rucno.telo });
+        r = await apiPoziv(upit(putRucno), { method: 'POST', headers: { 'Content-Type': rucno.tip }, body: rucno.telo, rokMs });
         try { j = await r.json(); } catch {}
         dn.rucno = opisOdgovora(r, j);
         dn.rucno_ms = Date.now() - t0;
@@ -1559,72 +1569,104 @@
     toast(en ? 'A copy was downloaded.' : 'Kopija zapisa je preuzeta.');
   }
 
-  let aktivniSyncPromis = null;
-  let traziDodatniSync = false;
+  // --- Slanje reda iz telefona: dve nezavisne trake ---
+  // Zapis sa velikim prilogom (video) može da se šalje minutima. Zato ide svojom trakom, a mali zapisi (tekst, fotografije, zvuk)
+  // svojom, da ne čekaju iza njega. Unutar trake zapisi idu redom po vremenu nastanka; prekid mreže zaustavlja samo tu traku,
+  // do sledećeg kruga osvežavanja.
+  const PRAG_VELIKOG_ZAPISA = 8 * 1024 * 1024;
 
-  async function sinhronizujRed(ukljuciOdbijene = false) {
-    if (aktivniSyncPromis) {
-      traziDodatniSync = true;
-      return aktivniSyncPromis;
-    }
-    aktivniSyncPromis = (async () => {
-      STANJE.sinhronizacijaUToku = true;
-      let mrezniPrekid = false;
-      let poslatoBarJedno = false;
-      try {
-        do {
-          traziDodatniSync = false;
-          STANJE.lokalniRed = await idbSviIzReda();
-          osveziStatusTraku();
-          if (STANJE.lokalniRed.length === 0 || !STANJE.sesija || !STANJE.sesija.tajna) {
-            break;
-          }
-          const sortirano = [...STANJE.lokalniRed].sort((a, b) => String(a.vreme_telefona).localeCompare(String(b.vreme_telefona)));
-          for (const st of sortirano) {
-            // Zapisi odbijeni zbog praznog tela šalju se sami ponovo (najviše nekoliko puta), bez dodira studenta.
-            const autoOpet = !ukljuciOdbijene && jeGreskaPraznogTela(st)
-              && (Number(st.auto_pokusaja_v2) || 0) < MAKS_AUTO_POKUSAJA_PRAZNOG_TELA;
-            if (st.trajna_greska && !ukljuciOdbijene && !autoOpet) continue;
-            if (st.trajna_greska) {
-              if (autoOpet) st.auto_pokusaja_v2 = (Number(st.auto_pokusaja_v2) || 0) + 1;
-              delete st.trajna_greska;
-              delete st.status_greske;
-              delete st.prazno_telo;
-            }
-            try {
-              const rez = await posaljiJedanIzReda(st);
-              if (rez.ishod === 'poslato') {
-                poslatoBarJedno = true;
-              } else if (rez.ishod === 'auth_pala') {
+  function bajtovaPriloga(st) {
+    return ((st && st.prilozi) || []).reduce((zbir, p) => zbir + (p && p.blob ? Number(p.blob.size) || 0 : 0), 0);
+  }
+  function jeVelikiZapis(st) {
+    return bajtovaPriloga(st) >= PRAG_VELIKOG_ZAPISA;
+  }
+
+  let aktivnihTraka = 0;
+
+  // Traka vraća funkciju slanja. Poziv dok je krug u toku ne otvara drugi krug: traži još jedan prolaz i vraća isto obećanje.
+  // Obećanje daje true kad traku nije prekinula mreža ni istekla prijava.
+  function napraviTrakuSlanja(pripadaTraci) {
+    let aktivanKrug = null;
+    let traziDodatniKrug = false;
+
+    return function posaljiTraku(ukljuciOdbijene = false) {
+      if (aktivanKrug) {
+        traziDodatniKrug = true;
+        return aktivanKrug;
+      }
+      aktivanKrug = (async () => {
+        aktivnihTraka++;
+        STANJE.sinhronizacijaUToku = true;
+        let mrezniPrekid = false;
+        let poslatoBarJedno = false;
+        try {
+          do {
+            traziDodatniKrug = false;
+            STANJE.lokalniRed = await idbSviIzReda();
+            osveziStatusTraku();
+            if (!STANJE.sesija || !STANJE.sesija.tajna) break;
+            const zaSlanje = STANJE.lokalniRed
+              .filter(pripadaTraci)
+              .sort((x, y) => String(x.vreme_telefona).localeCompare(String(y.vreme_telefona)));
+            for (const st of zaSlanje) {
+              // Zapisi odbijeni zbog praznog tela šalju se sami ponovo (najviše nekoliko puta), bez dodira studenta.
+              const autoOpet = !ukljuciOdbijene && jeGreskaPraznogTela(st)
+                && (Number(st.auto_pokusaja_v2) || 0) < MAKS_AUTO_POKUSAJA_PRAZNOG_TELA;
+              if (st.trajna_greska && !ukljuciOdbijene && !autoOpet) continue;
+              if (st.trajna_greska) {
+                if (autoOpet) st.auto_pokusaja_v2 = (Number(st.auto_pokusaja_v2) || 0) + 1;
+                delete st.trajna_greska;
+                delete st.status_greske;
+                delete st.prazno_telo;
+              }
+              try {
+                const rez = await posaljiJedanIzReda(st);
+                if (rez.ishod === 'poslato') {
+                  poslatoBarJedno = true;
+                } else if (rez.ishod === 'auth_pala') {
+                  mrezniPrekid = true;
+                  traziDodatniKrug = false;
+                  toast(rez.poruka);
+                  break;
+                }
+              } catch {
                 mrezniPrekid = true;
-                traziDodatniSync = false;
-                toast(rez.poruka);
+                traziDodatniKrug = false;
                 break;
               }
-            } catch {
-              mrezniPrekid = true;
-              traziDodatniSync = false;
-              break;
             }
-          }
-          ukljuciOdbijene = false;
-        } while (traziDodatniSync && !mrezniPrekid);
+            ukljuciOdbijene = false;
+          } while (traziDodatniKrug && !mrezniPrekid);
 
-        STANJE.lokalniRed = await idbSviIzReda();
-        osveziStatusTraku();
-        posaljiIzvestajSlanja().catch(() => {});
-        if (!mrezniPrekid || poslatoBarJedno) {
-          await ucitajStanjeSaServera(false);
-        } else {
-          crtajPodatke(true);
+          STANJE.lokalniRed = await idbSviIzReda();
+          osveziStatusTraku();
+          posaljiIzvestajSlanja().catch(() => {});
+          if (!mrezniPrekid || poslatoBarJedno) {
+            await ucitajStanjeSaServera(false);
+          } else {
+            crtajPodatke(true);
+          }
+        } finally {
+          aktivnihTraka--;
+          STANJE.sinhronizacijaUToku = aktivnihTraka > 0;
+          aktivanKrug = null;
         }
-      } finally {
-        STANJE.sinhronizacijaUToku = false;
-        aktivniSyncPromis = null;
-      }
-      return !mrezniPrekid && STANJE.lokalniRed.length === 0;
-    })();
-    return aktivniSyncPromis;
+        return !mrezniPrekid;
+      })();
+      return aktivanKrug;
+    };
+  }
+
+  const posaljiMaleZapise = napraviTrakuSlanja(st => !jeVelikiZapis(st));
+  const posaljiVelikeZapise = napraviTrakuSlanja(jeVelikiZapis);
+
+  // Pokreće obe trake. Čeka samo male zapise; veliki nastavljaju u pozadini.
+  // Vraća true kad je red u telefonu prazan (sve poslato).
+  async function sinhronizujRed(ukljuciOdbijene = false) {
+    posaljiVelikeZapise(ukljuciOdbijene).catch(() => {});
+    const maliProsli = await posaljiMaleZapise(ukljuciOdbijene);
+    return maliProsli && STANJE.lokalniRed.length === 0;
   }
 
   async function ukloniIzLokalnogReda(uuid) {
