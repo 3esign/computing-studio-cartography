@@ -1194,3 +1194,5 @@ button, input, textarea, select {
   pointer-events: none;
 }
 .toast-msg[hidden] { display: none !important; }
+
+.place-list { margin: 6px 0 6px; padding-left: 18px; display: grid; gap: 5px; font-size: 13px; line-height: 1.45; }

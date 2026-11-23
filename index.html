@@ -203,6 +203,18 @@
           <li data-sr="Ako nemaš signal ili je server privremeno nedostupan, zapis ostaje sačuvan u telefonu i sam se šalje čim se veza vrati." data-en="If offline or the server is temporarily unreachable, your entry stays safely on your phone and syncs automatically.">Ako nemaš signal ili je server privremeno nedostupan, zapis ostaje sačuvan u telefonu i sam se šalje čim se veza vrati.</li>
         </ol>
 
+        <div class="alert-box warn">
+          <strong data-sr="Odakle zapis dobija mesto na mapi" data-en="Where an entry gets its place on the map">Odakle zapis dobija mesto na mapi</strong>
+          <ul class="place-list">
+            <li data-sr="Tekst: mesto telefona u trenutku čuvanja. Piši dok si još na tom mestu." data-en="Text: the phone's position when you save. Write while you are still there.">Tekst: mesto telefona u trenutku čuvanja. Piši dok si još na tom mestu.</li>
+            <li data-sr="Slika dugmetom „Slikaj“: mesto telefona. Ovo je najsigurniji način i radi na svakom telefonu." data-en="Photo with “Take photo”: the phone's position. The safest way; works on every phone.">Slika dugmetom „Slikaj“: mesto telefona. Ovo je najsigurniji način i radi na svakom telefonu.</li>
+            <li data-sr="Slika iz galerije: mesto upisano u samoj slici. Slika bez lokacije se ne prima. iPhone: u galeriji dodirni „Options“ i uključi „Location“. Android: galerija najčešće briše lokaciju, zato slikaj iz aplikacije." data-en="Photo from gallery: the location stored in the photo. A photo without location is not accepted. iPhone: in the gallery tap “Options” and turn on “Location”. Android: the gallery usually strips location, so take photos in the app.">Slika iz galerije: mesto upisano u samoj slici. Slika bez lokacije se ne prima. iPhone: u galeriji dodirni „Options“ i uključi „Location“. Android: galerija najčešće briše lokaciju, zato slikaj iz aplikacije.</li>
+            <li data-sr="Zvuk: mesto telefona u trenutku čuvanja. Snimi i sačuvaj na istom mestu." data-en="Sound: the phone's position when you save. Record and save at the same spot.">Zvuk: mesto telefona u trenutku čuvanja. Snimi i sačuvaj na istom mestu.</li>
+            <li data-sr="Video (snimljen ili iz galerije): mesto telefona u trenutku čuvanja, do 60 s. Sačuvaj ga pre nego što odeš sa mesta." data-en="Video (recorded or from gallery): the phone's position when you save, up to 60 s. Save before you leave the spot.">Video (snimljen ili iz galerije): mesto telefona u trenutku čuvanja, do 60 s. Sačuvaj ga pre nego što odeš sa mesta.</li>
+          </ul>
+          <span data-sr="Pre čuvanja pogledaj traku na vrhu zapisa: tu piše koje mesto će biti upisano." data-en="Before saving, check the strip at the top of the entry: it shows which place will be recorded.">Pre čuvanja pogledaj traku na vrhu zapisa: tu piše koje mesto će biti upisano.</span>
+        </div>
+
         <div style="padding-top:4px;font-size:12.5px;color:var(--ink-soft)">
           <a href="https://3esign.github.io/computing-studio/" target="_blank" rel="noopener" style="color:var(--accent-dark);font-weight:700" data-sr="← Nazad na glavni sajt Computing Studio" data-en="← Back to Computing Studio main site">← Nazad na glavni sajt Computing Studio</a>
         </div>
@@ -264,7 +276,7 @@
           <input type="file" id="inp-cam-photo" accept="image/*" capture="environment" hidden>
           <input type="file" id="inp-cam-video" accept="video/*" capture="environment" hidden>
           <input type="file" id="inp-file-galerija" accept="image/*,video/*,audio/*" multiple hidden>
-          <span class="hint" data-sr="Slike se automatski optimizuju na telefonu bez skrivenih EXIF podataka. Video do 60 s (90 MB)." data-en="Photos are automatically optimized on device with EXIF removed. Video up to 60 s (90 MB).">Slike se automatski optimizuju na telefonu bez skrivenih EXIF podataka. Video do 60 s (90 MB).</span>
+          <span class="hint" data-sr="Slika iz galerije mora u sebi imati lokaciju; bez nje se ne prima (na licu mesta koristi „Slikaj“). Tekst, zvuk i video dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB)." data-en="A gallery photo must carry its location; without it, it is not accepted (on site use “Take photo”). Text, sound and video get the phone's position when saved. Video up to 60 s (90 MB).">Slika iz galerije mora u sebi imati lokaciju; bez nje se ne prima (na licu mesta koristi „Slikaj“). Tekst, zvuk i video dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB).</span>
         </div>
 
         <div class="attached-list" id="comp-attachments"></div>

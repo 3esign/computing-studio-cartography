@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-23.1';
+  const VERZIJA_APP = '2026-11-23.2';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -109,6 +109,7 @@
       gpsTrazi: 'Tražim GPS lokaciju…',
       mestoIzSlike: 'Mesto zapisa je uzeto iz slike.',
       mestoIzSlikeKratko: 'mesto iz slike',
+      slikaBezLokacije: ime => `Slika „${ime}“ nije dodata jer u sebi nema lokaciju, pa je ne možemo postaviti na mapu. Na licu mesta slikaj dugmetom „Slikaj“. iPhone: u galeriji dodirni „Options“ (Opcije) i uključi „Location“ pre izbora slike. Android: galerija najčešće briše lokaciju, zato slikaj iz aplikacije.`,
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `GPS grub (±${Math.round(m)} m)`,
       gpsNema: 'Uključi lokaciju (GPS)',
@@ -145,6 +146,7 @@
       gpsTrazi: 'Acquiring GPS…',
       mestoIzSlike: 'Entry location was taken from the photo.',
       mestoIzSlikeKratko: 'location from photo',
+      slikaBezLokacije: ime => `Photo “${ime}” was not added because it carries no location, so it cannot be placed on the map. On site, use “Take photo”. iPhone: in the gallery tap “Options” and turn on “Location” before choosing. Android: the gallery usually strips location, so take the photo in the app.`,
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `Coarse GPS (±${Math.round(m)} m)`,
       gpsNema: 'Enable location (GPS)',
@@ -2962,6 +2964,15 @@
           // Samo slika iz galerije nosi svoje mesto; slika iz kamere nastaje ovde i sada, pa važi GPS telefona.
           const imaoMesto = Boolean(gpsIzPrilogaKompozitora());
           const gpsSlike = await procitajGpsIzSlike(f);
+          if (!gpsSlike) {
+            // Od izdanja 2026-11-23.2: slika iz galerije bez svoje lokacije se ne prima, jer bi završila na mestu slanja.
+            const errEl = document.getElementById('comp-error');
+            errEl.textContent = t('slikaBezLokacije', f.name || 'slika');
+            errEl.hidden = false;
+            if (errEl.scrollIntoView) errEl.scrollIntoView({ block: 'nearest' });
+            continue;
+          }
+          document.getElementById('comp-error').hidden = true;
           await dodajSliku(f, gpsSlike);
           if (gpsSlike && !imaoMesto && gpsIzPrilogaKompozitora()) toast(t('mestoIzSlike'));
         } else dodajSnimak(f);
