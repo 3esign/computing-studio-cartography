@@ -1301,3 +1301,9 @@ button, input, textarea, select {
   background: var(--err);
   color: #fff;
 }
+
+/* Obaveštenje o lokaciji i privatnosti (izdanje 2026-11-23.6) */
+.privacy-note { padding: 2px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-soft); }
+.privacy-note p { margin: 0 0 6px; }
+.privacy-note summary { cursor: pointer; font-weight: 700; color: var(--accent-dark); padding: 4px 0; }
+.privacy-list { margin-top: 2px; }

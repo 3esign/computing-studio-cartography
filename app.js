@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-23.5';
+  const VERZIJA_APP = '2026-11-23.6';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -12,10 +12,12 @@
   const LS_JEZIK = 'uz_jezik_v1';
   const LS_API = 'uz_poslednji_api_v1';
   const LS_PRVI_PUT = 'uz_upoznat_v1';
+  const LS_PRIVATNOST = 'uz_privatnost_v1';
   const SS_PENDING_QR = 'uz_pending_qr_v1';
   const RAW_ENDPOINT_FALLBACK = 'https://raw.githubusercontent.com/3esign/computing-studio-cartography/main/endpoint.json';
   const GPS_SVEZ_MS = 3 * 60 * 1000;      // 3 min posle buđenja ekrana
   const GPS_MAKS_STAROST_MS = 5 * 60 * 1000; // 5 min apsolutni plafon pre čuvanja zapisa
+  const GPS_BEZ_PRACENJA_MS = 20 * 1000;  // jednokratno očitavanje važi 20 s; duže samo dok praćenje radi
 
   const STANJE = {
     jezik: localStorage.getItem(LS_JEZIK) === 'en' ? 'en' : 'sr',
@@ -111,6 +113,9 @@
       prijava: 'Prijava',
       nasTim: t => (t ? `Tim ${t}` : 'Naš tim'),
       gpsTrazi: 'Tražim GPS lokaciju…',
+      gpsMiruje: 'Lokacija se ne čita',
+      mestoCeka: 'mesto: dodaj sliku sa lokacijom ili snimi iz aplikacije',
+      potrebanGpsOdbijen: 'Pregledač ne dozvoljava lokaciju, a zapis nema sliku ni video sa lokacijom. Dodaj sliku iz galerije koja nosi lokaciju, ili dozvoli lokaciju (uputstvo je pod trakom lokacije na dnu ekrana).',
       mestoIzSlike: 'Mesto zapisa je uzeto iz slike.',
       mestoIzSlikeKratko: 'mesto iz slike',
       mestoIzVidea: 'Mesto zapisa je uzeto iz videa.',
@@ -150,7 +155,7 @@
       qrPrepoznat: (tim, sl, lim) => `QR kod prepoznat: Tim ${tim} (${sl}/${lim} zauzetih mesta). Upiši ime ili nadimak i uđi u žurnal.`,
       qrSkeniranOffline: tim => `QR kod prepoznat za tim ${tim}. Proveravam vezu sa serverom…`,
       potrebnaPrijava: 'Prvo se prijavi skeniranjem QR koda svog tima.',
-      potrebanGps: 'Sačekaj trenutak da telefon očita GPS lokaciju ili dozvoli pristup lokaciji u pregledaču.',
+      potrebanGps: 'Ovaj zapis nema sliku ni video sa lokacijom, pa mu treba mesto telefona. Ako pregledač pita, dozvoli lokaciju; zapis se čuva sam čim se mesto očita. Bez dozvole: dodaj sliku iz galerije koja nosi lokaciju.',
       potrebanPrilog: 'Dodaj bar zapažanje u tekstu, fotografiju, zvuk ili video.',
       sacuvanoUzivo: 'Zapis je upisan u Urbani žurnal i vidljiv na mapi!',
       sacuvanoOffline: 'Sačuvano u telefonu! Poslaće se automatski čim server bude dostupan.',
@@ -208,7 +213,10 @@
       qrPrepoznat: (tim, sl, lim) => `QR verified: Team ${tim} (${sl}/${lim} seats used). Enter your name or nickname to start.`,
       qrSkeniranOffline: tim => `QR recognized for team ${tim}. Checking server connection…`,
       potrebnaPrijava: 'Please sign in first by scanning your team QR code.',
-      potrebanGps: 'Please wait for phone GPS fix or allow location permission in your browser.',
+      potrebanGps: 'This entry has no photo or video with location, so it needs the phone\'s position. If the browser asks, allow location; the entry saves itself as soon as the position is read. Without permission: add a gallery photo that carries location.',
+      gpsMiruje: 'Location not in use',
+      mestoCeka: 'place: add a photo with location or capture in the app',
+      potrebanGpsOdbijen: 'The browser blocks location and the entry has no photo or video with location. Add a gallery photo that carries location, or allow location (guide is under the location bar at the bottom).',
       potrebanPrilog: 'Add at least a text note, photo, sound, or video.',
       sacuvanoUzivo: 'Entry saved to Urban Journal and live on the map!',
       sacuvanoOffline: 'Saved on your phone! Will sync automatically once connected.',
@@ -225,6 +233,42 @@
   function t(kljuc, ...args) {
     const v = TXT[STANJE.jezik][kljuc];
     return typeof v === 'function' ? v(...args) : v;
+  }
+
+  // Obaveštenje o lokaciji i privatnosti. Svaka rečenica mora odgovarati onome što kod stvarno radi:
+  // čitanje lokacije (pokreniGps, zaustaviGps), čišćenje medija (server/lib/mediji.cjs), javno stanje (server/lib/stanje.cjs).
+  const PRIVATNOST = [
+    ['Svaki zapis mora imati mesto. Dobija ga iz slike ili videa koji u sebi nose lokaciju, ili sa telefona dok praviš zapis.',
+     'Every entry needs a place. It comes from a photo or video that carries location, or from the phone while you make the entry.'],
+    ['Ne želiš da pregledaču dopustiš lokaciju? Slikaj kamerom telefona sa uključenom lokacijom, pa sliku dodaj dugmetom „Iz galerije“. Zapis se sam postavlja na mesto snimka. Na Androidu galerija često briše lokaciju iz slike; tada ovaj put ne radi i ostaje dozvola pregledaču.',
+     'Prefer not to give the browser your location? Take the photo with the phone camera with location on, then add it with “From gallery”. The entry is placed where the photo was taken. On Android the gallery often strips location from the photo; then this route does not work and browser permission remains the only way.'],
+    ['Lokaciju telefona aplikacija čita samo dok je zapis otvoren ili kad sam dodirneš dugme lokacije. Kad zatvoriš zapis, čitanje prestaje. Serveru ide samo tačka zapisa koji sačuvaš.',
+     'The app reads the phone\'s location only while an entry is open or when you tap the location button yourself. When you close the entry, reading stops. Only the point of an entry you save goes to the server.'],
+    ['Iz slike, videa i zvuka brišemo metapodatke (lokaciju u fajlu, model telefona) pre objave. Na mapi ostaje samo tačka zapisa.',
+     'We strip metadata (location inside the file, phone model) from photos, video and sound before publishing. Only the entry point stays on the map.'],
+    ['Mapu i zapise vide svi koji imaju link: potpis, tim, tačku, vreme, tekst i priloge. Za potpis je dovoljno ime ili nadimak; prezime nije potrebno.',
+     'Anyone with the link can see the map and entries: signature, team, point, time, text and attachments. A first name or nickname is enough as a signature; no surname needed.'],
+    ['Svoj zapis možeš da obrišeš u Dnevniku i on odmah nestaje sa mape. Kopija može ostati u rezervi na profesorovom računaru; za potpuno brisanje javi se profesoru.',
+     'You can delete your own entry in the Journal and it disappears from the map at once. A copy may remain in the backup on the professor\'s computer; for full deletion, contact the professor.'],
+    ['Server ne čuva tvoju IP adresu. Čuva vrstu telefona i pregledača, radi otklanjanja grešaka.',
+     'The server does not store your IP address. It stores the phone and browser type, for troubleshooting.'],
+    ['Aplikaciju, vezu do servera i podlogu mape isporučuju spoljni servisi (GitHub, Cloudflare, OpenFreeMap, Carto, OpenStreetMap); oni pri tome vide tvoju IP adresu.',
+     'The app, the link to the server and the base map are delivered by outside services (GitHub, Cloudflare, OpenFreeMap, Carto, OpenStreetMap); they see your IP address in the process.'],
+    ['Podaci služe za nastavu na predmetu Osnove računarstva.',
+     'The data is used for teaching in the Computing Fundamentals course.']
+  ];
+
+  function crtajPrivatnost() {
+    document.querySelectorAll('[data-privacy-list]').forEach(ul => {
+      ul.textContent = '';
+      for (const [sr, en] of PRIVATNOST) {
+        const li = document.createElement('li');
+        li.setAttribute('data-sr', sr);
+        li.setAttribute('data-en', en);
+        li.textContent = sr;
+        ul.appendChild(li);
+      }
+    });
   }
 
   function primeniJezik() {
@@ -742,25 +786,29 @@
   }
 
   // --- Jedinstveni upravljač panelima (uvek najviše jedan otvoren!) ---
-  const SVI_PANELI = ['modal-login', 'modal-info', 'modal-composer', 'modal-detail', 'modal-profile', 'modal-gps-help', 'modal-rank'];
+  const SVI_PANELI = ['modal-login', 'modal-info', 'modal-composer', 'modal-detail', 'modal-profile', 'modal-gps-help', 'modal-rank', 'modal-privacy'];
 
   function otvoriPanel(id) {
     if (id !== 'modal-login') zaustaviQrKameru();
     const tst = document.getElementById('toast');
     if (tst) tst.hidden = true;
+    const zapisBioOtvoren = kompozitorOtvoren();
     for (const pid of SVI_PANELI) {
       const el = document.getElementById(pid);
       if (el) el.hidden = pid !== id;
     }
+    if (zapisBioOtvoren && id !== 'modal-composer') zaustaviGps();
   }
 
   function zatvoriSvePanele() {
     zaustaviSnimanjeZvuka(true);
     zaustaviQrKameru();
+    const zapisBioOtvoren = kompozitorOtvoren();
     for (const pid of SVI_PANELI) {
       const el = document.getElementById(pid);
       if (el) el.hidden = true;
     }
+    if (zapisBioOtvoren) zaustaviGps();
   }
 
   // --- Zaglavlje i status ---
@@ -798,8 +846,61 @@
     }
   }
 
-  // --- GPS lokacija (automatski, bez ručnog nišanjenja + zaštita od zastarele lokacije posle prevoza) ---
+  // --- GPS lokacija (bez ručnog nišanjenja + zaštita od zastarele lokacije posle prevoza) ---
+  // Od izdanja 2026-11-23.6 lokacija telefona se čita samo dok je zapis otvoren ili na izričit dodir dugmeta lokacije.
+  // Pregledač pita za dozvolu tek kad zapisu zatreba mesto telefona: kad se doda prilog bez svoje lokacije
+  // ili kad se čuva zapis bez slike sa lokacijom. Praćenje se gasi kad se zapis zatvori i kad kartica ode u pozadinu.
   let gpsWatchId = null;
+  let gpsCita = false;    // jedno očitavanje je u toku
+  let gpsZaZapis = false; // otvoreni zapis je zatražio mesto telefona
+  let cuvanjeCekaMesto = false; // „Sačuvaj“ je dodirnut pre nego što je mesto očitano; zapis se čuva sam čim stigne
+
+  function prekiniGpsPracenje() {
+    if (gpsWatchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+
+  // Kraj čitanja: bez praćenja, bez zapamćene tačke i bez plave tačke na mapi.
+  function zaustaviGps() {
+    prekiniGpsPracenje();
+    gpsZaZapis = false;
+    cuvanjeCekaMesto = false;
+    gpsCita = false;
+    STANJE.gps = null;
+    if (STANJE.korisnikMarker) {
+      STANJE.korisnikMarker.remove();
+      STANJE.korisnikMarker = null;
+    }
+    osveziGpsPrikaz();
+  }
+
+  // Mesto telefona koje sme u zapis: sveže, i starije od 20 s samo ako ga praćenje i dalje održava.
+  function mestoTelefona() {
+    const g = STANJE.gps;
+    if (!g) return null;
+    const starost = Date.now() - (g.ts || 0);
+    if (starost > GPS_MAKS_STAROST_MS) return null;
+    if (gpsWatchId === null && starost > GPS_BEZ_PRACENJA_MS) return null;
+    return g;
+  }
+
+  // Zapis traži mesto telefona. Ne radi ništa ako zapis nije otvoren ili već ima mesto iz slike ili videa.
+  function traziMestoTelefona() {
+    if (!kompozitorOtvoren() || gpsIzPrilogaKompozitora()) return;
+    gpsZaZapis = true;
+    pokreniGps(false, true);
+  }
+
+  // Da li je pregledač već dobio dozvolu, pa čitanje ne otvara nikakav upit.
+  async function gpsVecDozvoljen() {
+    try {
+      const s = await navigator.permissions.query({ name: 'geolocation' });
+      return s.state === 'granted';
+    } catch {
+      return false;
+    }
+  }
+
   function osveziGpsPrikaz() {
     const dot = document.getElementById('gps-dot');
     const lbl = document.getElementById('gps-label');
@@ -814,20 +915,25 @@
     } else if (STANJE.gpsGreska) {
       dot.className = 'dot err';
       lbl.textContent = STANJE.gpsGreskaKod === 1 ? t('gpsOdbijeno') : t('gpsGreskaTxt');
-    } else {
+    } else if (gpsCita || gpsWatchId !== null) {
       dot.className = 'dot warn';
       lbl.textContent = t('gpsTrazi');
+    } else {
+      dot.className = 'dot';
+      lbl.textContent = t('gpsMiruje');
     }
     azurirajKompozitorMeta();
   }
 
-  function pokreniGps(centrirajAkoDobije = false) {
+  // prati = true drži praćenje dok je zapis otvoren; bez toga je jedno očitavanje (dugme lokacije na mapi i u traci).
+  function pokreniGps(centrirajAkoDobije = false, prati = false) {
     if (!navigator.geolocation) {
       STANJE.gpsGreska = 'Geolokacija nije podržana.';
       osveziGpsPrikaz();
       return;
     }
     const naPoziciju = pos => {
+      gpsCita = false;
       STANJE.gps = {
         lat: pos.coords.latitude,
         lon: pos.coords.longitude,
@@ -845,8 +951,18 @@
         centrirajAkoDobije = false;
         STANJE.mapa.flyTo({ center: [STANJE.gps.lon, STANJE.gps.lat], zoom: 17.2, duration: 900 });
       }
+      if (cuvanjeCekaMesto && kompozitorOtvoren()) {
+        cuvanjeCekaMesto = false;
+        sacuvajNoviZapis();
+      }
     };
     const naGresku = err => {
+      gpsCita = false;
+      if (err && err.code === 1) {
+        prekiniGpsPracenje(); // odbijena dozvola: nema šta da se prati
+        if (cuvanjeCekaMesto && kompozitorOtvoren()) document.getElementById('comp-error').textContent = t('potrebanGpsOdbijen');
+        cuvanjeCekaMesto = false;
+      }
       if (!STANJE.gps) {
         STANJE.gpsGreska = err && err.message ? err.message : 'GPS nedostupan';
         STANJE.gpsGreskaKod = err && err.code;
@@ -857,12 +973,16 @@
       }
       osveziGpsPrikaz();
     };
+    // Posle greške (na primer odbijene dozvole) staro praćenje ne oživljava samo; novi pokušaj kreće od početka.
+    if (STANJE.gpsGreska) prekiniGpsPracenje();
+    gpsCita = true;
+    osveziGpsPrikaz();
     navigator.geolocation.getCurrentPosition(naPoziciju, naGresku, {
       enableHighAccuracy: true,
       timeout: 12000,
-      maximumAge: 15000
+      maximumAge: prati ? 15000 : 0 // dodir dugmeta lokacije uvek traži sveže očitavanje
     });
-    if (gpsWatchId === null) {
+    if (prati && gpsWatchId === null) {
       gpsWatchId = navigator.geolocation.watchPosition(naPoziciju, naGresku, {
         enableHighAccuracy: true,
         timeout: 20000,
@@ -974,11 +1094,11 @@
         limit: j.limit
       });
       try { localStorage.setItem(LS_PRVI_PUT, '1'); } catch {}
+      try { localStorage.setItem(LS_PRIVATNOST, '1'); } catch {}
       if (navigator.storage && typeof navigator.storage.persist === 'function') {
         navigator.storage.persist().catch(() => {});
       }
       zatvoriSvePanele();
-      pokreniGps(true);
       toast(`${j.tim} · ${j.nadimak || j.oznaka}`);
       ucitajStanjeSaServera();
       sinhronizujRed();
@@ -1324,7 +1444,7 @@
       ? `${t(izSlike.izvor === 'video' ? 'mestoIzVideaKratko' : 'mestoIzSlikeKratko')}: ${izSlike.lat.toFixed(5)}, ${izSlike.lon.toFixed(5)} (±${izSlike.tacnost_m} m)`
       : STANJE.gps
       ? `${STANJE.gps.lat.toFixed(5)}, ${STANJE.gps.lon.toFixed(5)} (±${STANJE.gps.tacnost_m} m)`
-      : t('gpsTrazi');
+      : t(gpsCita || gpsWatchId !== null ? 'gpsTrazi' : 'mestoCeka');
     const vremeIzPriloga = vremeSnimkaIzPriloga(izSlike);
     const sadTxt = vremeIzPriloga
       ? `${t('snimljenoKratko')} ${formatVreme(vremeIzPriloga)}`
@@ -1361,11 +1481,12 @@
       pripremiPrijavuPanel();
       return;
     }
-    if (STANJE.gps && Date.now() - (STANJE.gps.ts || 0) > GPS_SVEZ_MS) {
-      STANJE.gps = null;
-      osveziGpsPrikaz();
-    }
-    pokreniGps(false);
+    // Tačka zaostala od ranijeg dodira dugmeta lokacije važi samo ako je sasvim sveža.
+    if (!mestoTelefona()) STANJE.gps = null;
+    gpsZaZapis = false;
+    osveziGpsPrikaz();
+    // Kad je dozvola već data, čitanje kreće odmah i bez upita, da mesto bude spremno do čuvanja.
+    gpsVecDozvoljen().then(da => { if (da) traziMestoTelefona(); });
     ocistiKompozitor();
     // Ako je mobilni OS ugasio karticu dok je kamera bila otvorena, automatski vrati započeti tekst i tagove!
     try {
@@ -1410,8 +1531,11 @@
       stavka.previewUrl = URL.createObjectURL(stavka.blob);
     }
     STANJE.kompozitorPrilozi.push(stavka);
+    cuvanjeCekaMesto = false; // zapis se promenio; čuva se tek na nov dodir
     crtajKompozitorPriloge();
     azurirajKompozitorMeta();
+    // Prilog bez svoje lokacije (snimak iz aplikacije, zvuk) traži mesto telefona; tek tada pregledač pita za dozvolu.
+    if (!stavka.gpsSlike) traziMestoTelefona();
   }
 
   function crtajKompozitorPriloge() {
@@ -1459,14 +1583,13 @@
 
     // Slika iz galerije sa upisanom lokacijom određuje mesto zapisa; tada GPS telefona nije uslov.
     const gpsSlike = gpsIzPrilogaKompozitora();
-    if (!gpsSlike && (!STANJE.gps || (STANJE.gps.ts && Date.now() - STANJE.gps.ts > GPS_MAKS_STAROST_MS))) {
-      if (STANJE.gps) {
-        STANJE.gps = null;
-        osveziGpsPrikaz();
-      }
-      errEl.textContent = t('potrebanGps');
+    const mestoTel = gpsSlike ? null : mestoTelefona();
+    if (!gpsSlike && !mestoTel) {
+      STANJE.gps = null;
+      errEl.textContent = t(STANJE.gpsGreskaKod === 1 ? 'potrebanGpsOdbijen' : 'potrebanGps');
       errEl.hidden = false;
-      pokreniGps(false);
+      cuvanjeCekaMesto = true;
+      traziMestoTelefona();
       return;
     }
 
@@ -1479,7 +1602,7 @@
 
     btn.disabled = true;
     try {
-      const mesto = gpsSlike || STANJE.gps;
+      const mesto = gpsSlike || mestoTel;
       const zapisZaRed = {
         uuid_klijenta: generisiUuid(),
         tim: STANJE.sesija.tim,
@@ -3112,6 +3235,9 @@
     };
 
     document.getElementById('btn-info').onclick = () => otvoriPanel('modal-info');
+    document.querySelectorAll('[data-open-privacy]').forEach(b => {
+      b.onclick = () => otvoriPanel('modal-privacy');
+    });
     document.getElementById('btn-rang').onclick = () => {
       crtajRangListu();
       otvoriPanel('modal-rank');
@@ -3255,9 +3381,8 @@
         otvoriPanel('modal-gps-help');
       }
       STANJE.gpsRucno = true;
-      if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+      prekiniGpsPracenje();
       STANJE.gpsGreska = '';
-      osveziGpsPrikaz();
       pokreniGps(true);
     };
 
@@ -3266,9 +3391,8 @@
       btnRetryGps.onclick = () => {
         zatvoriSvePanele();
         STANJE.gpsRucno = true;
-        if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+        prekiniGpsPracenje();
         STANJE.gpsGreska = '';
-        osveziGpsPrikaz();
         pokreniGps(true);
       };
     }
@@ -3435,12 +3559,18 @@
       ucitajStanjeSaServera();
     });
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState !== 'visible') {
+        // Kartica u pozadini ne čita lokaciju. Otvoren zapis pamti da je tražio mesto i nastavlja po povratku (npr. iz kamere).
+        if (kompozitorOtvoren()) prekiniGpsPracenje();
+        else zaustaviGps();
+        return;
+      }
+      {
         if (STANJE.gps && Date.now() - (STANJE.gps.ts || 0) > GPS_SVEZ_MS) {
           STANJE.gps = null;
           osveziGpsPrikaz();
         }
-        pokreniGps(false);
+        if (gpsZaZapis) traziMestoTelefona();
         drziEkranBudnim();
         if (STANJE.swRegistracija && typeof STANJE.swRegistracija.update === 'function') {
           STANJE.swRegistracija.update().catch(() => {});
@@ -3461,6 +3591,7 @@
         sacuvajSesiju(idbSes);
       }
     }
+    crtajPrivatnost();
     poveziDogadjaje();
     primeniJezik();
     inicijalizujMapu();
@@ -3505,7 +3636,6 @@
             if (prenetaPrijava) {
               toast(`${j.tim} · ${j.nadimak || j.oznaka} (isto mesto preneto)`);
             }
-            pokreniGps(prenetaPrijava);
           } else if (r.status === 401) {
             sacuvajSesiju(null);
             if (STANJE.pendingQr) await pripremiPrijavuPanel();
@@ -3513,7 +3643,6 @@
           }
         } catch {
           // Offline sa postojećom sesijom: pusti studenta da nesmetano radi u offline modu!
-          pokreniGps(false);
         }
       }
     } else if (STANJE.pendingQr) {
@@ -3521,6 +3650,12 @@
     } else if (!localStorage.getItem(LS_PRVI_PUT)) {
       otvoriPanel('modal-info');
       localStorage.setItem(LS_PRVI_PUT, '1');
+    }
+    // Telefoni prijavljeni pre izdanja 2026-11-23.6 nisu videli obaveštenje na prijavi; dobijaju ga jednom, ovde.
+    if (STANJE.sesija && STANJE.sesija.tajna && !STANJE.pendingQr && !localStorage.getItem(LS_PRIVATNOST)
+        && SVI_PANELI.every(pid => document.getElementById(pid).hidden)) {
+      otvoriPanel('modal-privacy');
+      try { localStorage.setItem(LS_PRIVATNOST, '1'); } catch {}
     }
 
     await ucitajStanjeSaServera(false);

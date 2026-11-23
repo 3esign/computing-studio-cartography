@@ -93,9 +93,9 @@
 
     <!-- 4. DONJA AKCIONA TRAKA -->
     <footer class="actionbar" aria-label="Unos u žurnal">
-      <button type="button" class="gps-status" id="btn-gps-bar" title="Dodirni za osvežavanje GPS lokacije">
-        <span class="dot warn" id="gps-dot"></span>
-        <span class="gps-label" id="gps-label" data-sr="Tražim GPS lokaciju…" data-en="Acquiring GPS…">Tražim GPS lokaciju…</span>
+      <button type="button" class="gps-status" id="btn-gps-bar" title="Dodirni da telefon jednom očita lokaciju">
+        <span class="dot" id="gps-dot"></span>
+        <span class="gps-label" id="gps-label">Lokacija se ne čita</span>
       </button>
       <button type="button" class="rank-chip" id="btn-rang" title="Napredak i rang timova" aria-label="Napredak i rang timova / Progress and team ranking">
         <span aria-hidden="true">▤</span><span id="rang-label">Rang</span>
@@ -171,9 +171,16 @@
         </div>
 
         <div class="field">
-          <label for="inp-nadimak" data-sr="Tvoje ime ili nadimak (lični potpis u okviru tima)" data-en="Your name or nickname (personal signature within team)">Tvoje ime ili nadimak (lični potpis u okviru tima)</label>
+          <label for="inp-nadimak" data-sr="Tvoje ime ili nadimak, bez prezimena (lični potpis u okviru tima)" data-en="Your first name or nickname, no surname (personal signature within team)">Tvoje ime ili nadimak, bez prezimena (lični potpis u okviru tima)</label>
           <input class="input" id="inp-nadimak" type="text" maxlength="32" placeholder="npr. Ana, Marko..." autocomplete="given-name">
           <span class="hint" data-sr="Svi članovi tima koriste isti QR kod sa svojih telefona, a tvoje ime potpisuje tvoja zapažanja." data-en="All team members scan the same team QR on their own phones; your name signs your entries.">Svi članovi tima koriste isti QR kod sa svojih telefona, a tvoje ime potpisuje tvoja zapažanja.</span>
+        </div>
+        <div class="privacy-note">
+          <p data-sr="Lokacija telefona se čita samo dok praviš zapis, a možeš i bez nje: slikom iz galerije koja nosi lokaciju. Mapu i zapise vide svi koji imaju link." data-en="The phone's location is read only while you make an entry, and you can do without it: use a gallery photo that carries location. Anyone with the link can see the map and entries.">Lokacija telefona se čita samo dok praviš zapis, a možeš i bez nje: slikom iz galerije koja nosi lokaciju. Mapu i zapise vide svi koji imaju link.</p>
+          <details>
+            <summary data-sr="Lokacija i privatnost: ceo tekst" data-en="Location &amp; privacy: full text">Lokacija i privatnost: ceo tekst</summary>
+            <ul class="place-list privacy-list" data-privacy-list></ul>
+          </details>
         </div>
       </div>
       <div class="sheet-foot">
@@ -201,7 +208,7 @@
 
         <ol class="steps-list">
           <li data-sr="Svi članovi tima skeniraju isti QR kod svog tima u glavnom pregledaču (Chrome ili Safari) i upisuju svoje ime ili nadimak kao lični potpis." data-en="All team members scan the same team QR code in Chrome or Safari and enter their name or nickname as their personal signature.">Svi članovi tima skeniraju isti QR kod svog tima u glavnom pregledaču (Chrome ili Safari) i upisuju svoje ime ili nadimak kao lični potpis.</li>
-          <li data-sr="Dogovorite koji deo grada (komšiluk, blok ili naselje) vaš tim istražuje, uključite lokaciju na telefonu i krenite kroz prostor." data-en="Agree on the part of the city (neighborhood, block, or settlement) your team is exploring, turn on phone location, and walk through the area.">Dogovorite koji deo grada (komšiluk, blok ili naselje) vaš tim istražuje, uključite lokaciju na telefonu i krenite kroz prostor.</li>
+          <li data-sr="Dogovorite koji deo grada (komšiluk, blok ili naselje) vaš tim istražuje i krenite kroz prostor. Pregledač će pitati za lokaciju tek kad zapisu zatreba mesto telefona." data-en="Agree on the part of the city (neighborhood, block, or settlement) your team is exploring and walk through the area. The browser asks for location only when an entry needs the phone's position.">Dogovorite koji deo grada (komšiluk, blok ili naselje) vaš tim istražuje i krenite kroz prostor. Pregledač će pitati za lokaciju tek kad zapisu zatreba mesto telefona.</li>
           <li data-sr="Dodirni + Novi zapis i zabeleži doživljaj prostora, okruženja ili kretanja (tekst, fotografija, zvuk grada ili kratak video) — svaki zapis osvetljava krug iskustva (5–25 m) na mapi." data-en="Tap + New entry to capture your experience of space, surroundings, or movement (text, photo, city sound, or short video) — every entry illuminates an experience circle (5–25 m) on the map.">Dodirni + Novi zapis i zabeleži doživljaj prostora, okruženja ili kretanja (tekst, fotografija, zvuk grada ili kratak video) — svaki zapis osvetljava krug iskustva (5–25 m) na mapi.</li>
           <li data-sr="Ako nemaš signal ili je server privremeno nedostupan, zapis ostaje sačuvan u telefonu i sam se šalje čim se veza vrati." data-en="If offline or the server is temporarily unreachable, your entry stays safely on your phone and syncs automatically.">Ako nemaš signal ili je server privremeno nedostupan, zapis ostaje sačuvan u telefonu i sam se šalje čim se veza vrati.</li>
         </ol>
@@ -231,6 +238,8 @@
           </ul>
           <span data-sr="Svoj napredak (na primer 9/15) i rang svih timova vidiš na dugmetu ▤ pored „Novi zapis“." data-en="Your progress (for example 9/15) and the ranking of all teams are behind the ▤ button next to “New entry”.">Svoj napredak (na primer 9/15) i rang svih timova vidiš na dugmetu ▤ pored „Novi zapis“.</span>
         </div>
+
+        <button type="button" class="btn-secondary" data-open-privacy style="width:100%" data-sr="Lokacija i privatnost" data-en="Location &amp; privacy">Lokacija i privatnost</button>
 
         <div style="padding-top:4px;font-size:12.5px;color:var(--ink-soft)">
           <a href="https://3esign.github.io/computing-studio/" target="_blank" rel="noopener" style="color:var(--accent-dark);font-weight:700" data-sr="← Nazad na glavni sajt Computing Studio" data-en="← Back to Computing Studio main site">← Nazad na glavni sajt Computing Studio</a>
@@ -305,6 +314,22 @@
     </div>
   </div>
 
+  <!-- PANEL 8: LOKACIJA I PRIVATNOST (tekst je u public/app.js, niz PRIVATNOST) -->
+  <div class="sheet-backdrop" id="modal-privacy" role="dialog" aria-modal="true" aria-labelledby="privacy-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="privacy-title" data-sr="Lokacija i privatnost" data-en="Location &amp; privacy">Lokacija i privatnost</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body">
+        <ul class="place-list privacy-list" data-privacy-list></ul>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-primary" data-close-modal data-sr="Razumem" data-en="Got it">Razumem</button>
+      </div>
+    </div>
+  </div>
+
   <!-- PANEL 7: NAPREDAK ČLANA I RANG TIMOVA (Zadatak 1) -->
   <div class="sheet-backdrop" id="modal-rank" role="dialog" aria-modal="true" aria-labelledby="rank-title" hidden>
     <div class="sheet">
@@ -356,6 +381,7 @@
           <input class="input" id="prof-nadimak" type="text" maxlength="32">
         </div>
         <div id="prof-queue-box" class="alert-box warn" hidden></div>
+        <button type="button" class="btn-secondary" data-open-privacy style="width:100%" data-sr="Lokacija i privatnost" data-en="Location &amp; privacy">Lokacija i privatnost</button>
         <div class="field">
           <label data-sr="Prelazak u drugi pregledač na istom telefonu (Chrome / Safari)" data-en="Switch to another browser on this phone (Chrome / Safari)">Prelazak u drugi pregledač na istom telefonu (Chrome / Safari)</label>
           <button type="button" class="btn-secondary" id="btn-transfer-session" style="width:100%" data-sr="↗ Kopiraj link za prenos ove prijave (isto mesto)" data-en="↗ Copy link to transfer this sign-in (same seat)">↗ Kopiraj link za prenos ove prijave (isto mesto)</button>
@@ -377,8 +403,8 @@
         <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
       </div>
       <div class="sheet-body">
-        <div class="alert-box warn" data-sr="Pregledač trenutno nema dozvolu za čitanje lokacije telefona. Zapis u Urbanom žurnalu beleži stvarno mesto na kom stojiš." data-en="Your browser currently does not have permission to access phone location. Urban Journal records the real place where you stand.">
-          Pregledač trenutno nema dozvolu za čitanje lokacije telefona. Zapis u Urbanom žurnalu beleži stvarno mesto na kom stojiš.
+        <div class="alert-box warn" data-sr="Pregledač trenutno nema dozvolu za čitanje lokacije telefona. Dozvola nije obavezna: zapis dobija mesto i iz slike ili videa iz galerije koji u sebi nose lokaciju. Tekst, zvuk i snimci iz aplikacije traže mesto telefona." data-en="Your browser currently does not have permission to read the phone's location. Permission is optional: an entry also gets its place from a gallery photo or video that carries location. Text, sound and in-app captures need the phone's position.">
+          Pregledač trenutno nema dozvolu za čitanje lokacije telefona. Dozvola nije obavezna: zapis dobija mesto i iz slike ili videa iz galerije koji u sebi nose lokaciju. Tekst, zvuk i snimci iz aplikacije traže mesto telefona.
         </div>
         <div class="field">
           <label data-sr="Na Android telefonu (Chrome):" data-en="On Android (Chrome):">Na Android telefonu (Chrome):</label>
