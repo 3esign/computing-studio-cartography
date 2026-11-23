@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-22.2';
+  const VERZIJA_APP = '2026-11-23.1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -107,6 +107,8 @@
       prijava: 'Prijava',
       nasTim: t => (t ? `Tim ${t}` : 'Naš tim'),
       gpsTrazi: 'Tražim GPS lokaciju…',
+      mestoIzSlike: 'Mesto zapisa je uzeto iz slike.',
+      mestoIzSlikeKratko: 'mesto iz slike',
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `GPS grub (±${Math.round(m)} m)`,
       gpsNema: 'Uključi lokaciju (GPS)',
@@ -141,6 +143,8 @@
       prijava: 'Sign in',
       nasTim: t => (t ? `Team ${t}` : 'Our team'),
       gpsTrazi: 'Acquiring GPS…',
+      mestoIzSlike: 'Entry location was taken from the photo.',
+      mestoIzSlikeKratko: 'location from photo',
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `Coarse GPS (±${Math.round(m)} m)`,
       gpsNema: 'Enable location (GPS)',
@@ -865,6 +869,90 @@
     }
   }
 
+  // >>> exif-gps
+  // Lokacija iz slike (EXIF GPS). Radi nad sirovim bajtovima JPEG/HEIC/WebP fajla pre nego što optimizacija obriše EXIF.
+  // Vraća { lat, lon, tacnost_m } ili null. iPhone šalje GPS samo za sliku iz galerije kad je u biraču pod „Options“
+  // uključena lokacija; Android birač slika lokaciju briše pre stranice, pa tamo po pravilu vraća null.
+  function gpsIzExifBajtova(u8) {
+    if (!u8 || u8.length < 16) return null;
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const kraj = u8.length;
+    const pokusaj = tiff => {
+      if (tiff + 8 > kraj) return null;
+      const b0 = u8[tiff], b1 = u8[tiff + 1];
+      let le;
+      if (b0 === 0x49 && b1 === 0x49) le = true; else if (b0 === 0x4D && b1 === 0x4D) le = false; else return null;
+      if (dv.getUint16(tiff + 2, le) !== 42) return null;
+      const u16 = o => dv.getUint16(o, le);
+      const u32 = o => dv.getUint32(o, le);
+      const nadjiUnos = (ifd, tag) => {
+        if (ifd < tiff || ifd + 2 > kraj) return -1;
+        const n = u16(ifd);
+        if (n > 512) return -1;
+        for (let i = 0; i < n; i++) {
+          const e = ifd + 2 + i * 12;
+          if (e + 12 > kraj) return -1;
+          if (u16(e) === tag) return e;
+        }
+        return -1;
+      };
+      const racionalni = (e, koliko) => {
+        if (e < 0 || u16(e + 2) !== 5 || u32(e + 4) < koliko) return null;
+        const o = tiff + u32(e + 8);
+        if (o + koliko * 8 > kraj) return null;
+        const izl = [];
+        for (let i = 0; i < koliko; i++) {
+          const br = u32(o + i * 8), im = u32(o + i * 8 + 4);
+          if (!im) return null;
+          izl.push(br / im);
+        }
+        return izl;
+      };
+      const eGps = nadjiUnos(tiff + u32(tiff + 4), 0x8825);
+      if (eGps < 0) return null;
+      const gps = tiff + u32(eGps + 8);
+      const eLatRef = nadjiUnos(gps, 1), eLonRef = nadjiUnos(gps, 3);
+      const dLat = racionalni(nadjiUnos(gps, 2), 3), dLon = racionalni(nadjiUnos(gps, 4), 3);
+      if (eLatRef < 0 || eLonRef < 0 || !dLat || !dLon) return null;
+      const latRef = String.fromCharCode(u8[eLatRef + 8]).toUpperCase();
+      const lonRef = String.fromCharCode(u8[eLonRef + 8]).toUpperCase();
+      if ((latRef !== 'N' && latRef !== 'S') || (lonRef !== 'E' && lonRef !== 'W')) return null;
+      let lat = dLat[0] + dLat[1] / 60 + dLat[2] / 3600;
+      let lon = dLon[0] + dLon[1] / 60 + dLon[2] / 3600;
+      if (latRef === 'S') lat = -lat;
+      if (lonRef === 'W') lon = -lon;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+      if (Math.abs(lat) < 1e-6 && Math.abs(lon) < 1e-6) return null;
+      const greska = racionalni(nadjiUnos(gps, 0x1F), 1); // GPSHPositioningError, metri
+      const tacnost = greska && greska[0] > 0 ? Math.min(500, Math.max(3, Math.round(greska[0]))) : 30;
+      return { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6, tacnost_m: tacnost };
+    };
+    // "Exif\0\0" + TIFF (JPEG APP1, HEIC Exif stavka) ili "EXIF" + dužina + TIFF (WebP)
+    for (let i = 0; i + 14 < kraj; i++) {
+      if (u8[i] === 0x45 && (u8[i + 1] | 0x20) === 0x78 && (u8[i + 2] | 0x20) === 0x69 && (u8[i + 3] | 0x20) === 0x66) {
+        const r = (u8[i + 4] === 0 && u8[i + 5] === 0 ? pokusaj(i + 6) : null) || pokusaj(i + 8) || pokusaj(i + 14);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+  // <<< exif-gps
+
+  async function procitajGpsIzSlike(fajl) {
+    try {
+      if (!fajl || !fajl.size) return null;
+      const deo = fajl.slice(0, Math.min(fajl.size, 2 * 1024 * 1024));
+      return gpsIzExifBajtova(new Uint8Array(await procitajBajtovePriloga(deo)));
+    } catch {
+      return null;
+    }
+  }
+
+  function gpsIzPrilogaKompozitora() {
+    const p = STANJE.kompozitorPrilozi.find(x => x.gpsSlike);
+    return p ? p.gpsSlike : null;
+  }
+
   // --- Optimizacija slike na telefonu (WebP / JPEG <= 1600 px, ciljno ~180–450 KB, 0 EXIF) ---
   async function optimizujSliku(fajl) {
     const url = URL.createObjectURL(fajl);
@@ -1016,7 +1104,10 @@
     const el = document.getElementById('comp-meta-strip');
     if (!el || document.getElementById('modal-composer').hidden) return;
     const timTxt = STANJE.sesija ? `${STANJE.sesija.tim} · ${STANJE.sesija.nadimak || STANJE.sesija.oznaka}` : 'Nije prijavljen';
-    const gpsTxt = STANJE.gps
+    const izSlike = gpsIzPrilogaKompozitora();
+    const gpsTxt = izSlike
+      ? `${t('mestoIzSlikeKratko')}: ${izSlike.lat.toFixed(5)}, ${izSlike.lon.toFixed(5)} (±${izSlike.tacnost_m} m)`
+      : STANJE.gps
       ? `${STANJE.gps.lat.toFixed(5)}, ${STANJE.gps.lon.toFixed(5)} (±${STANJE.gps.tacnost_m} m)`
       : t('gpsTrazi');
     const sadTxt = new Date().toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' });
@@ -1097,6 +1188,7 @@
     }
     STANJE.kompozitorPrilozi.push(stavka);
     crtajKompozitorPriloge();
+    azurirajKompozitorMeta();
   }
 
   function crtajKompozitorPriloge() {
@@ -1125,6 +1217,7 @@
           if (STANJE.kompozitorPrilozi[idx].previewUrl) URL.revokeObjectURL(STANJE.kompozitorPrilozi[idx].previewUrl);
           STANJE.kompozitorPrilozi.splice(idx, 1);
           crtajKompozitorPriloge();
+          azurirajKompozitorMeta();
         }
       };
     });
@@ -1141,7 +1234,9 @@
     const btn = document.getElementById('btn-save-entry');
     errEl.hidden = true;
 
-    if (!STANJE.gps || (STANJE.gps.ts && Date.now() - STANJE.gps.ts > GPS_MAKS_STAROST_MS)) {
+    // Slika iz galerije sa upisanom lokacijom određuje mesto zapisa; tada GPS telefona nije uslov.
+    const gpsSlike = gpsIzPrilogaKompozitora();
+    if (!gpsSlike && (!STANJE.gps || (STANJE.gps.ts && Date.now() - STANJE.gps.ts > GPS_MAKS_STAROST_MS))) {
       if (STANJE.gps) {
         STANJE.gps = null;
         osveziGpsPrikaz();
@@ -1161,6 +1256,7 @@
 
     btn.disabled = true;
     try {
+      const mesto = gpsSlike || STANJE.gps;
       const zapisZaRed = {
         uuid_klijenta: generisiUuid(),
         tim: STANJE.sesija.tim,
@@ -1169,10 +1265,11 @@
         nedelja: STANJE.aktivnaNedelja || 1,
         tema: 'subjektivni-dozivljaj',
         kategorije: Array.from(STANJE.kompozitorTagovi),
-        lat: STANJE.gps.lat,
-        lon: STANJE.gps.lon,
-        tacnost_m: STANJE.gps.tacnost_m,
-        radijus_m: Math.min(25, Math.max(5, Math.round(STANJE.gps.tacnost_m))),
+        lat: mesto.lat,
+        lon: mesto.lon,
+        tacnost_m: mesto.tacnost_m,
+        radijus_m: Math.min(25, Math.max(5, Math.round(mesto.tacnost_m))),
+        izvor_lokacije: gpsSlike ? 'slika' : 'uredjaj',
         vreme_telefona: new Date().toISOString(),
         tekst,
         prilozi: STANJE.kompozitorPrilozi.map(p => ({
@@ -1246,6 +1343,7 @@
       ['lat', String(stavka.lat)],
       ['lon', String(stavka.lon)],
       ['tacnost_m', String(stavka.tacnost_m)],
+      ['izvor_lokacije', stavka.izvor_lokacije === 'slika' ? 'slika' : 'uredjaj'],
       ['vreme_telefona', stavka.vreme_telefona],
       ['nadimak', stavka.nadimak || ''],
       ['tekst', stavka.tekst || '']
@@ -2809,9 +2907,10 @@
       compTextEl.addEventListener('input', sacuvajNacrtKompozitora);
     }
 
-    const dodajSliku = async f => {
+    const dodajSliku = async (f, gpsSlike) => {
       try {
         const opt = await optimizujSliku(f);
+        if (gpsSlike) opt.gpsSlike = gpsSlike;
         dodajPrilogUKompozitor(opt);
       } catch (err) {
         // Ako pregledač (npr. Windows/Android Chrome za iPhone .HEIC/.AVIF) ne ume sam da otvori sliku,
@@ -2824,7 +2923,8 @@
             blob: f,
             sirina: 0,
             visina: 0,
-            trajanje: 0
+            trajanje: 0,
+            gpsSlike: gpsSlike || null
           });
         } else {
           toast((err && err.message) || 'Slika nije mogla da se obradi.');
@@ -2858,7 +2958,13 @@
     };
     document.getElementById('inp-file-galerija').onchange = async e => {
       for (const f of uzmiFajlove(e)) {
-        if (jeSlika(f)) await dodajSliku(f); else dodajSnimak(f);
+        if (jeSlika(f)) {
+          // Samo slika iz galerije nosi svoje mesto; slika iz kamere nastaje ovde i sada, pa važi GPS telefona.
+          const imaoMesto = Boolean(gpsIzPrilogaKompozitora());
+          const gpsSlike = await procitajGpsIzSlike(f);
+          await dodajSliku(f, gpsSlike);
+          if (gpsSlike && !imaoMesto && gpsIzPrilogaKompozitora()) toast(t('mestoIzSlike'));
+        } else dodajSnimak(f);
       }
     };
 
