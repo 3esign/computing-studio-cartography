@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-23.4';
+  const VERZIJA_APP = '2026-11-23.5';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -118,10 +118,15 @@
       snimljenoKratko: 'snimljeno',
       videoBezLokacije: ime => `Video „${ime}“ nije dodat jer u sebi nema lokaciju, pa ga ne možemo postaviti na mapu. Na licu mesta snimi dugmetom „Snimi video“. iPhone: u galeriji dodirni „Options“ (Opcije) i uključi „Location“ pre izbora videa. Android: galerija najčešće briše lokaciju, zato snimaj iz aplikacije.`,
       nivoKratko: n => `nivo ${n}/3`,
-      nivoOpis: n => (n === 3 ? 'Potpun: prilog, tekst od najmanje 40 znakova i sloj doživljaja' : n === 2 ? 'Opisan: ima tekst od najmanje 40 znakova ili sloj doživljaja' : 'Osnovni: mesto i prilog'),
+      nivoOpis: n => (n === 3
+        ? 'Potpun: prilog i najmanje dva od tri elementa (tekst ≥ 40 znakova, sloj doživljaja, bogat medij: 3+ priloga ili 2+ vrste)'
+        : n === 2
+          ? 'Opisan: ima tekst ≥ 40 znakova, sloj doživljaja ili bogat medij (3+ priloga ili 2+ vrste)'
+          : 'Osnovni: mesto i prilog'),
       faliPrilog: 'prilog (slika, zvuk ili video)',
       faliTekst: 'tekst od najmanje 40 znakova',
       faliSloj: 'sloj doživljaja',
+      ili: 'ili',
       zaNivo3: fali => `Za nivo 3 još treba: ${fali}.`,
       zaNivo3Uredi: fali => `Za nivo 3 još treba: ${fali}. Dopuni u Dnevniku dugmetom „Uredi“.`,
       nivo3Dostignut: 'Zapis je potpun (nivo 3).',
@@ -171,10 +176,15 @@
       snimljenoKratko: 'taken',
       videoBezLokacije: ime => `Video “${ime}” was not added because it carries no location, so it cannot be placed on the map. On site, use “Record video”. iPhone: in the gallery tap “Options” and turn on “Location” before choosing. Android: the gallery usually strips location, so record in the app.`,
       nivoKratko: n => `level ${n}/3`,
-      nivoOpis: n => (n === 3 ? 'Complete: attachment, text of at least 40 characters and an experience layer' : n === 2 ? 'Described: has text of at least 40 characters or an experience layer' : 'Basic: place and attachment'),
+      nivoOpis: n => (n === 3
+        ? 'Complete: attachment and at least two of three elements (text ≥ 40 characters, experience layer, rich media: 3+ attachments or 2+ types)'
+        : n === 2
+          ? 'Described: has text ≥ 40 characters, an experience layer, or rich media (3+ attachments or 2+ types)'
+          : 'Basic: place and attachment'),
       faliPrilog: 'an attachment (photo, sound or video)',
       faliTekst: 'text of at least 40 characters',
       faliSloj: 'an experience layer',
+      ili: 'or',
       zaNivo3: fali => `Level 3 still needs: ${fali}.`,
       zaNivo3Uredi: fali => `Level 3 still needs: ${fali}. Add it in the Journal with “Edit”.`,
       nivo3Dostignut: 'The entry is complete (level 3).',
@@ -2211,21 +2221,40 @@
   }
 
   // --- Zadatak 1: minimum po članu, tri nivoa popunjenosti i rang timova ---
-  // Isto pravilo nivoa je na serveru (server/lib/stanje.cjs, nivoZapisa); menjaju se zajedno.
-  function nivoZapisa(z) {
-    const imaTekst = String((z && z.tekst) || '').trim().length >= 40;
-    const imaSloj = Array.isArray(z && z.kategorije) && z.kategorije.length > 0;
-    const imaPrilog = Array.isArray(z && z.prilozi) && z.prilozi.length > 0;
-    if (imaTekst && imaSloj && imaPrilog) return 3;
-    return imaTekst || imaSloj ? 2 : 1;
+  // Isto pravilo nivoa je na serveru (server/lib/stanje.cjs, imaBogatMedij, nivoZapisa); menjaju se zajedno.
+  function imaBogatMedij(prilozi) {
+    if (!Array.isArray(prilozi) || !prilozi.length) return false;
+    if (prilozi.length >= 3) return true;
+    const vrste = new Set();
+    for (const p of prilozi) if (p && p.vrsta) vrste.add(p.vrsta);
+    return vrste.size >= 2;
   }
 
-  function staFaliZaNivo3(tekst, kategorije, brojPriloga) {
+  function nivoZapisa(z) {
+    const prilozi = Array.isArray(z && z.prilozi) ? z.prilozi : [];
+    const imaPrilog = prilozi.length > 0;
+    const imaTekst = String((z && z.tekst) || '').trim().length >= 40;
+    const imaSloj = Array.isArray(z && z.kategorije) && z.kategorije.length > 0;
+    const bogat = imaBogatMedij(prilozi);
+    const stubova = (imaTekst ? 1 : 0) + (imaSloj ? 1 : 0) + (bogat ? 1 : 0);
+    if (imaPrilog && stubova >= 2) return 3;
+    return stubova >= 1 ? 2 : 1;
+  }
+
+  function staFaliZaNivo3(tekst, kategorije, prilozi) {
+    const listaPriloga = Array.isArray(prilozi) ? prilozi : [];
+    const imaPrilog = listaPriloga.length > 0;
+    const imaTekst = String(tekst || '').trim().length >= 40;
+    const imaSloj = Array.isArray(kategorije) && kategorije.length > 0;
+    const bogat = imaBogatMedij(listaPriloga);
+    const stubova = (imaTekst ? 1 : 0) + (imaSloj ? 1 : 0) + (bogat ? 1 : 0);
+    if (imaPrilog && stubova >= 2) return '';
+    if (bogat && !imaTekst && !imaSloj) return `${t('faliTekst')} ${t('ili')} ${t('faliSloj')}`;
     const fali = [];
-    if (!brojPriloga) fali.push(t('faliPrilog'));
-    if (String(tekst || '').trim().length < 40) fali.push(t('faliTekst'));
-    if (!kategorije || !kategorije.length) fali.push(t('faliSloj'));
-    return fali;
+    if (!imaPrilog) fali.push(t('faliPrilog'));
+    if (!imaTekst) fali.push(t('faliTekst'));
+    if (!imaSloj) fali.push(t('faliSloj'));
+    return fali.join(', ');
   }
 
   function htmlNivoa(z) {
@@ -2554,8 +2583,8 @@
           `;
           const osveziSavet = () => {
             const kat = holder.querySelectorAll('.choice-chip.selected');
-            const fali = staFaliZaNivo3(holder.querySelector('textarea').value, Array.from(kat), (z.prilozi || []).length);
-            holder.querySelector('[data-edit-hint]').textContent = fali.length ? t('zaNivo3', fali.join(', ')) : t('nivo3Dostignut');
+            const fali = staFaliZaNivo3(holder.querySelector('textarea').value, Array.from(kat), z.prilozi);
+            holder.querySelector('[data-edit-hint]').textContent = fali ? t('zaNivo3', fali) : t('nivo3Dostignut');
           };
           holder.querySelectorAll('[data-edit-tag]').forEach(c => {
             c.onclick = () => { c.classList.toggle('selected'); osveziSavet(); };
@@ -2631,7 +2660,7 @@
         <span>GPS ${Number(z.lat).toFixed(5)}, ${Number(z.lon).toFixed(5)} (±${Math.round(z.tacnost_m || 12)} m)</span> ·
         ${htmlNivoa(z)}
       </div>
-      ${jeMojServerZapis(z) && nivoZapisa(z) < 3 ? `<div class="edit-hint">${esc(t('zaNivo3Uredi', staFaliZaNivo3(z.tekst, z.kategorije, (z.prilozi || []).length).join(', ')))}</div>` : ''}
+      ${jeMojServerZapis(z) && nivoZapisa(z) < 3 ? `<div class="edit-hint">${esc(t('zaNivo3Uredi', staFaliZaNivo3(z.tekst, z.kategorije, z.prilozi)))}</div>` : ''}
       ${z.uTelefonu ? `<div class="alert-box ${z.trajna_greska ? 'err' : 'warn'}">${esc(z.trajna_greska || t('uTelefonuOznaka'))}</div>` : ''}
       ${tagHtml}
       ${z.tekst ? `<p class="entry-text">${esc(z.tekst)}</p>` : ''}

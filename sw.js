@@ -1,7 +1,7 @@
 /* Urbani žurnal · Network-First Service Worker za offline otvaranje ljuske aplikacije na terenu */
 'use strict';
 
-const KES_NAZIV = 'uz-ljuska-v2';
+const KES_NAZIV = 'uz-ljuska-v3';
 const STATICKI_FAJLOVI = [
   './',
   './index.html',
