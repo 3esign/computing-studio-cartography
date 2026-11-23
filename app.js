@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-23.6';
+  const VERZIJA_APP = '2026-11-23.7';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -28,7 +28,11 @@
     gps: null,              // { lat, lon, tacnost_m, vreme }
     gpsGreska: '',
     pogled: 'mapa',         // 'mapa' | 'lista'
-    filter: 'svi',          // 'svi' | 'tim'
+    filter: 'svi',          // 'svi' | 'tim' (izvedeno iz filterTim; menja ga samo postaviFilter)
+    filterTim: '',          // '' = ceo grad, inače oznaka tima čiji se zapisi prikazuju
+    filterClan: 0,          // 0 = ceo tim, inače uredjaj_id člana čiji se dnevnik prikazuje
+    rangOtvoreni: new Set(), // timovi čiji su članovi rašireni u rang-listi
+    trebaUokviriti: false,  // posle izbora tima ili člana mapa se jednom uokviri na njihove zapise
     aktivnaNedelja: 1,
     serverZapisi: [],
     serverStatistika: { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} },
@@ -2296,6 +2300,7 @@
         uTelefonu: true,
         trajna_greska: q.trajna_greska || '',
         tim: q.tim,
+        uredjaj_id: (STANJE.sesija && STANJE.sesija.tim === q.tim && Number(STANJE.sesija.uredjaj_id)) || 0,
         autor: q.nadimak || q.oznaka_uredjaja || 'član tima',
         nedelja: q.nedelja,
         kategorije: q.kategorije || [],
@@ -2314,10 +2319,195 @@
     const spojeno = [...lokalni, ...STANJE.serverZapisi].sort((a, b) =>
       String(b.vreme || '').localeCompare(String(a.vreme || ''))
     );
-    if (STANJE.filter === 'tim' && STANJE.sesija && STANJE.sesija.tim) {
-      return spojeno.filter(z => z.tim === STANJE.sesija.tim);
+    if (STANJE.filterTim) {
+      const clan = STANJE.filterClan;
+      return spojeno.filter(z => z.tim === STANJE.filterTim && (!clan || Number(z.uredjaj_id) === clan));
     }
     return spojeno;
+  }
+
+  // --- Dnevnik jednog tima ili jednog člana (isti filter važi i za mapu) ---
+  // „Član“ je telefon (uredjaj_id), kao i u rang-listi; ime je potpis sa njegovog najnovijeg zapisa.
+  function clanoviTima(tim) {
+    const poId = new Map();
+    for (const z of STANJE.serverZapisi) {
+      if (z.tim !== tim) continue;
+      const id = Number(z.uredjaj_id) || 0;
+      let c = poId.get(id);
+      if (!c) {
+        c = { id, ime: z.autor || 'član tima', zapisa: 0, zadatak: 0, nivoi: [0, 0, 0], vrste: { foto: 0, video: 0, zvuk: 0 }, prvi: z.vreme, poslednji: z.vreme };
+        poId.set(id, c);
+      }
+      c.zapisa++;
+      if (Number(z.nedelja || 1) === 1) {
+        c.zadatak++;
+        c.nivoi[nivoZapisa(z) - 1]++;
+      }
+      for (const p of z.prilozi || []) if (p && c.vrste[p.vrsta] !== undefined) c.vrste[p.vrsta]++;
+      if (String(z.vreme || '') < String(c.prvi || '')) c.prvi = z.vreme;
+      if (String(z.vreme || '') > String(c.poslednji || '')) c.poslednji = z.vreme;
+    }
+    return Array.from(poId.values()).sort((a, b) => b.zadatak - a.zadatak || b.zapisa - a.zapisa || a.ime.localeCompare(b.ime));
+  }
+
+  function saberiClanove(clanovi) {
+    const s = { zapisa: 0, zadatak: 0, nivoi: [0, 0, 0], vrste: { foto: 0, video: 0, zvuk: 0 }, prvi: '', poslednji: '' };
+    for (const c of clanovi) {
+      s.zapisa += c.zapisa;
+      s.zadatak += c.zadatak;
+      for (let i = 0; i < 3; i++) s.nivoi[i] += c.nivoi[i];
+      for (const k of Object.keys(s.vrste)) s.vrste[k] += c.vrste[k];
+      if (!s.prvi || String(c.prvi) < s.prvi) s.prvi = String(c.prvi || '');
+      if (String(c.poslednji || '') > s.poslednji) s.poslednji = String(c.poslednji || '');
+    }
+    return s;
+  }
+
+  function tekstNivoa(n) {
+    return STANJE.jezik === 'en'
+      ? `level 1: ${n[0]} · level 2: ${n[1]} · level 3: ${n[2]}`
+      : `nivo 1: ${n[0]} · nivo 2: ${n[1]} · nivo 3: ${n[2]}`;
+  }
+
+  function tekstVrsta(v) {
+    return STANJE.jezik === 'en'
+      ? `photos ${v.foto} · videos ${v.video} · sounds ${v.zvuk}`
+      : `slika ${v.foto} · videa ${v.video} · zvukova ${v.zvuk}`;
+  }
+
+  function htmlTrakaNivoa(n) {
+    const uk = n[0] + n[1] + n[2];
+    return `<div class="rank-bar lvl" role="img" aria-label="${esc(tekstNivoa(n))}">${[0, 1, 2].map(i =>
+      (n[i] > 0 ? `<i class="l${i + 1}" style="width:${((n[i] / uk) * 100).toFixed(1)}%"></i>` : '')).join('')}</div>`;
+  }
+
+  function linkDnevnika(tim, clan) {
+    const u = new URL(location.href);
+    u.hash = '';
+    u.searchParams.set('dnevnik', clan ? `${tim}.${clan}` : tim);
+    return u.toString();
+  }
+
+  function postaviFilter(tim, clan) {
+    STANJE.filterTim = tim ? String(tim) : '';
+    STANJE.filterClan = STANJE.filterTim && Number(clan) > 0 ? Number(clan) : 0;
+    STANJE.filter = STANJE.filterTim ? 'tim' : 'svi';
+    STANJE.dnevnikPrikazano = 30;
+    STANJE.trebaUokviriti = Boolean(STANJE.filterTim);
+    crtajPodatke();
+    if (STANJE.pogled === 'mapa') uokviriOpsegNaMapi();
+  }
+
+  let potpisIzboraFiltera = '';
+  // Birači tima i člana, dugmad „Ceo grad / Naš tim“, oznaka na mapi i kartica sa zbirom izabranog dnevnika.
+  function osveziPrikazFiltera() {
+    const en = STANJE.jezik === 'en';
+    const tim = STANJE.filterTim;
+    const mojTim = (STANJE.sesija && STANJE.sesija.tim) || '';
+    document.getElementById('filter-all-btn').classList.toggle('active', !tim);
+    document.getElementById('filter-team-btn').classList.toggle('active', Boolean(tim) && tim === mojTim && !STANJE.filterClan);
+
+    const selTim = document.getElementById('scope-team');
+    const selClan = document.getElementById('scope-member');
+    const karta = document.getElementById('journal-scope-card');
+    const cip = document.getElementById('map-scope-chip');
+    if (!selTim || !selClan || !karta || !cip) return;
+
+    const brojPoTimu = new Map();
+    for (const z of STANJE.serverZapisi) brojPoTimu.set(z.tim, (brojPoTimu.get(z.tim) || 0) + 1);
+    if (tim && !brojPoTimu.has(tim)) brojPoTimu.set(tim, 0);
+    const timovi = Array.from(brojPoTimu.keys()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const clanovi = tim ? clanoviTima(tim) : [];
+    const izabran = STANJE.filterClan ? clanovi.find(c => c.id === STANJE.filterClan) : null;
+
+    // Birači se pregrađuju samo kad se promeni njihov sadržaj, da otvoren birač na telefonu ne bude zatvoren osvežavanjem.
+    const potpis = [STANJE.jezik, tim, mojTim, timovi.map(k => k + ':' + brojPoTimu.get(k)).join(','), clanovi.map(c => `${c.id}:${c.ime}:${c.zapisa}`).join(',')].join('|');
+    if (potpis !== potpisIzboraFiltera) {
+      potpisIzboraFiltera = potpis;
+      selTim.innerHTML = `<option value="">${esc(en ? 'All teams' : 'Svi timovi')} (${STANJE.serverZapisi.length})</option>` +
+        timovi.map(k => `<option value="${esc(k)}">${esc(k)}${k === mojTim ? (en ? ' · our team' : ' · naš tim') : ''} (${brojPoTimu.get(k)})</option>`).join('');
+      selClan.innerHTML = `<option value="0">${esc(en ? 'Whole team' : 'Ceo tim')}</option>` +
+        clanovi.map(c => `<option value="${c.id}">${esc(c.ime)} (${c.zapisa})</option>`).join('');
+    }
+    selTim.value = tim;
+    selClan.value = String(izabran ? izabran.id : 0);
+    document.getElementById('scope-member-field').hidden = !tim || clanovi.length === 0;
+    document.getElementById('journal-intro-card').hidden = Boolean(tim);
+
+    cip.hidden = !tim;
+    karta.hidden = !tim;
+    if (!tim) { karta.innerHTML = ''; return; }
+    const imeClana = STANJE.filterClan ? ((izabran && izabran.ime) || (en ? 'member' : 'član')) : '';
+    cip.textContent = `${tim}${imeClana ? ' · ' + imeClana : ''}  ✕`;
+    cip.title = en ? 'Showing only these entries. Tap to show the whole city.' : 'Prikazani su samo ovi zapisi. Dodirni za ceo grad.';
+
+    const zbir = STANJE.filterClan ? (izabran || saberiClanove([])) : saberiClanove(clanovi);
+    const min = minimumPoClanu();
+    const stTim = (STANJE.serverStatistika.po_timu || {})[tim];
+    const redovi = [];
+    if (STANJE.filterClan) {
+      redovi.push(`${en ? 'Task 1' : 'Zadatak 1'}: ${zbir.zadatak}/${min}${zbir.zadatak >= min ? ' ✓' : ''}`);
+    } else {
+      const z = stTim && stTim.zadatak;
+      redovi.push((en ? `entries ${zbir.zapisa} · members with entries ${clanovi.length}` : `zapisa ${zbir.zapisa} · članova sa zapisima ${clanovi.length}`) +
+        (z ? (en ? ` · done ${z.ispunilo}/${z.clanova}` : ` · ispunilo ${z.ispunilo}/${z.clanova}`) : '') +
+        (stTim ? ` · ${Number(stTim.otkriveno_m2 || 0).toLocaleString('sr-RS')} m²` : ''));
+    }
+    redovi.push(tekstNivoa(zbir.nivoi) + ' · ' + tekstVrsta(zbir.vrste));
+    if (zbir.zapisa > 0) redovi.push(`${formatVreme(zbir.prvi)} – ${formatVreme(zbir.poslednji)}`);
+    karta.innerHTML = `
+      <h2><span class="entry-team-badge">${esc(tim)}</span><span>${esc(STANJE.filterClan
+        ? (en ? `Journal · ${imeClana}` : `Dnevnik · ${imeClana}`)
+        : (en ? 'Team journal' : 'Dnevnik tima'))}</span></h2>
+      ${zbir.zadatak > 0 ? `<div class="rank-line">${htmlTrakaNivoa(zbir.nivoi)}</div>` : ''}
+      ${redovi.map(r => `<div class="rank-sub">${esc(r)}</div>`).join('')}
+      <div class="scope-actions">
+        ${STANJE.filterClan ? `<button type="button" class="link-btn" data-scope-team>${esc(en ? 'Whole team' : 'Ceo tim')}</button>` : ''}
+        <button type="button" class="link-btn" data-scope-map>${esc(en ? 'Show on map' : 'Prikaži na mapi')}</button>
+        <button type="button" class="link-btn" data-scope-link>${esc(en ? 'Copy link' : 'Kopiraj link')}</button>
+        <button type="button" class="link-btn" data-scope-all>${esc(en ? 'All teams' : 'Svi timovi')}</button>
+      </div>`;
+    const naDugme = (sel, fn) => { const b = karta.querySelector(sel); if (b) b.onclick = fn; };
+    naDugme('[data-scope-team]', () => postaviFilter(tim, 0));
+    naDugme('[data-scope-all]', () => postaviFilter('', 0));
+    naDugme('[data-scope-map]', () => { STANJE.trebaUokviriti = true; postaviPogled('mapa'); });
+    naDugme('[data-scope-link]', async () => {
+      const link = linkDnevnika(tim, STANJE.filterClan);
+      try {
+        await navigator.clipboard.writeText(link);
+        toast(en ? 'Link copied.' : 'Link je kopiran.');
+      } catch {
+        window.prompt(en ? 'Copy the link:' : 'Kopiraj link:', link);
+      }
+    });
+  }
+
+  // Uokviruje na mapi sve zapise izabranog tima ili člana; jednom po izboru, da ne otima mapu dok je student pomera.
+  function uokviriOpsegNaMapi() {
+    if (!STANJE.trebaUokviriti || !STANJE.filterTim || !STANJE.mapa || !STANJE.mapaSpremna) return;
+    const tacke = sviVidljiviZapisi().filter(z => Number.isFinite(Number(z.lat)) && Number.isFinite(Number(z.lon)));
+    if (!tacke.length) return;
+    STANJE.trebaUokviriti = false;
+    let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+    for (const z of tacke) {
+      minLon = Math.min(minLon, Number(z.lon)); maxLon = Math.max(maxLon, Number(z.lon));
+      minLat = Math.min(minLat, Number(z.lat)); maxLat = Math.max(maxLat, Number(z.lat));
+    }
+    setTimeout(() => {
+      try { STANJE.mapa.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 70, maxZoom: 18, duration: 700 }); } catch {}
+    }, 80);
+  }
+
+  // Link oblika ?dnevnik=T53 ili ?dnevnik=T53.12 otvara odmah dnevnik tima ili člana.
+  function primeniFilterIzAdrese() {
+    const sirovo = String(new URLSearchParams(location.search).get('dnevnik') || '').trim();
+    const m = /^([A-Za-z0-9_-]{1,12})(?:\.(\d{1,9}))?$/.exec(sirovo);
+    if (!m) return;
+    STANJE.filterTim = m[1];
+    STANJE.filterClan = Number(m[2]) || 0;
+    STANJE.filter = 'tim';
+    STANJE.trebaUokviriti = true;
+    STANJE.pogled = 'lista';
   }
 
   function punUrlMedija(url) {
@@ -2433,13 +2623,27 @@
     const st = STANJE.serverStatistika || {};
     const poTimu = st.po_timu || {};
     const procenat = (a, b) => (b > 0 ? Math.max(0, Math.min(100, (a / b) * 100)) : 0);
-    const nivoiTxt = n => (en
-      ? `level 1: ${n[0]} · level 2: ${n[1]} · level 3: ${n[2]}`
-      : `nivo 1: ${n[0]} · nivo 2: ${n[1]} · nivo 3: ${n[2]}`);
-    const trakaNivoa = n => {
-      const uk = n[0] + n[1] + n[2];
-      return `<div class="rank-bar lvl" role="img" aria-label="${esc(nivoiTxt(n))}">${[0, 1, 2].map(i =>
-        (n[i] > 0 ? `<i class="l${i + 1}" style="width:${procenat(n[i], uk).toFixed(1)}%"></i>` : '')).join('')}</div>`;
+    const nivoiTxt = tekstNivoa;
+    const trakaNivoa = htmlTrakaNivoa;
+    const mojId = Number(STANJE.sesija && STANJE.sesija.uredjaj_id) || 0;
+    const htmlClanova = tim => {
+      const clanovi = clanoviTima(tim).filter(c => c.zadatak > 0);
+      if (!clanovi.length) return '';
+      return `
+          <details class="rank-members-box" data-rank-box="${esc(tim)}"${STANJE.rangOtvoreni.has(tim) ? ' open' : ''}>
+            <summary>${esc(en ? `Members (${clanovi.length})` : `Članovi (${clanovi.length})`)}</summary>
+            <ul class="rank-member-list">${clanovi.map(c => `
+              <li class="rank-member ${c.id === mojId ? 'me' : ''}">
+                <button type="button" class="rank-member-btn" data-rank-tim="${esc(tim)}" data-rank-clan="${c.id}" title="${esc(en ? 'Open the journal of this member' : 'Otvori dnevnik ovog člana')}">
+                  <span class="rank-member-name">${esc(c.ime)}</span>
+                  <div class="rank-bar"><i style="width:${procenat(c.zadatak, min).toFixed(1)}%"></i></div>
+                  <span class="rank-num">${c.zadatak}/${min}${c.zadatak >= min ? ' ✓' : ''}</span>
+                </button>
+                <div class="rank-line">${trakaNivoa(c.nivoi)}</div>
+                <div class="rank-sub">${esc(nivoiTxt(c.nivoi) + ' · ' + tekstVrsta(c.vrste) + ' · ' + (en ? 'last ' : 'poslednji ') + formatVreme(c.poslednji))}</div>
+              </li>`).join('')}
+            </ul>
+          </details>`;
     };
 
     let html = '';
@@ -2484,6 +2688,7 @@
             <span class="rank-pos">${i + 1}</span>
             <span class="entry-team-badge">${esc(r.tim)}</span>
             <span class="rank-members">${r.z.ispunilo}/${r.z.clanova} ${esc(en ? 'members done' : 'članova ispunilo')}${r.z.ispunilo >= r.z.clanova ? ' ✓' : ''}</span>
+            <button type="button" class="rank-open" data-rank-tim="${esc(r.tim)}" data-rank-clan="0">${esc(en ? 'Team journal →' : 'Dnevnik tima →')}</button>
           </div>
           <div class="rank-line">
             <span class="rank-cap">${esc(en ? 'Quantity' : 'Količina')}</span>
@@ -2495,12 +2700,26 @@
             ${trakaNivoa(r.z.nivoi)}
             <span class="rank-num">${Math.round(r.udeo3)}%</span>
           </div>
-          <div class="rank-sub">${esc((en ? `entries ${r.uk} · ` : `zapisa ${r.uk} · `) + nivoiTxt(r.z.nivoi))}</div>
+          <div class="rank-sub">${esc((en ? `entries ${r.uk} · ` : `zapisa ${r.uk} · `) + nivoiTxt(r.z.nivoi))}</div>${htmlClanova(r.tim)}
         </li>`).join('')}</ol>`;
       const bez = Math.max(0, (Number(st.timova_ukupno) || 0) - redovi.length);
       if (bez > 0) html += `<p class="rank-empty">${esc(en ? `${bez} more teams have no entries yet.` : `Još ${bez} timova nema nijedan zapis.`)}</p>`;
     }
     telo.innerHTML = html;
+    telo.querySelectorAll('[data-rank-box]').forEach(d => {
+      d.addEventListener('toggle', () => {
+        const tim = d.getAttribute('data-rank-box');
+        if (d.open) STANJE.rangOtvoreni.add(tim); else STANJE.rangOtvoreni.delete(tim);
+      });
+    });
+    telo.querySelectorAll('[data-rank-tim]').forEach(b => {
+      b.onclick = () => {
+        zatvoriSvePanele();
+        postaviFilter(b.getAttribute('data-rank-tim'), Number(b.getAttribute('data-rank-clan')) || 0);
+        postaviPogled('lista');
+        document.getElementById('list-wrap').scrollTop = 0;
+      };
+    });
   }
 
   function htmlPriloziZapisa(prilozi, uDetalju = false) {
@@ -2538,7 +2757,7 @@
 
   function napraviPotpisPrikaza(zapisi, m2) {
     const limit = Math.min(zapisi.length, STANJE.dnevnikPrikazano);
-    const delovi = [`${STANJE.jezik}|${STANJE.filter}|${STANJE.apiBaza || ''}|${m2}|${zapisi.length}|${limit}`];
+    const delovi = [`${STANJE.jezik}|${STANJE.filterTim}|${STANJE.filterClan}|${STANJE.apiBaza || ''}|${m2}|${zapisi.length}|${limit}`];
     for (let i = 0; i < limit; i++) {
       const z = zapisi[i];
       const pr = (z.prilozi || []).map(p => `${p.id || 'L'}:${p.vrsta}:${p.obrada_status || ''}:${p.url || ''}`).join(',');
@@ -2560,17 +2779,19 @@
   function crtajPodatke(prisilno = false) {
     const zapisi = sviVidljiviZapisi();
     document.getElementById('count-entries').textContent = String(zapisi.length);
+    osveziPrikazFiltera();
     osveziRangCip();
     const rangPanel = document.getElementById('modal-rank');
     if (rangPanel && !rangPanel.hidden) crtajRangListu();
 
     // Metrika otkrivenosti (m²)
     let m2 = STANJE.serverStatistika.otkriveno_m2_ukupno || 0;
-    if (STANJE.filter === 'tim' && STANJE.sesija && STANJE.sesija.tim) {
-      const stTim = (STANJE.serverStatistika.po_timu || {})[STANJE.sesija.tim];
+    if (STANJE.filterTim) {
+      const stTim = (STANJE.serverStatistika.po_timu || {})[STANJE.filterTim];
       m2 = stTim ? stTim.otkriveno_m2 : 0;
     }
-    document.getElementById('metric-m2').textContent = `${m2.toLocaleString('sr-RS')} m²`;
+    // Površina se računa na serveru po timu; za jednog člana je nema, pa se ne prikazuje tuđi broj.
+    document.getElementById('metric-m2').textContent = STANJE.filterClan ? '—' : `${m2.toLocaleString('sr-RS')} m²`;
 
     // Uvek osveži slojeve 3D mape (brzo i bez prekidanja DOM elemenata)
     azurirajSlojeveMape(zapisi);
@@ -3217,6 +3438,7 @@
     document.getElementById('view-list-btn').setAttribute('aria-selected', String(!jeMapa));
     if (jeMapa && STANJE.mapa) {
       setTimeout(() => STANJE.mapa.resize(), 30);
+      uokviriOpsegNaMapi();
     } else if (!jeMapa && STANJE.dnevnikPrljav) {
       crtajPodatke(true);
     }
@@ -3239,6 +3461,7 @@
       b.onclick = () => otvoriPanel('modal-privacy');
     });
     document.getElementById('btn-rang').onclick = () => {
+      if (STANJE.sesija && STANJE.sesija.tim && !STANJE.rangOtvoreni.size) STANJE.rangOtvoreni.add(STANJE.sesija.tim);
       crtajRangListu();
       otvoriPanel('modal-rank');
       ucitajStanjeSaServera(true);
@@ -3319,13 +3542,10 @@
     document.getElementById('view-map-btn').onclick = () => postaviPogled('mapa');
     document.getElementById('view-list-btn').onclick = () => postaviPogled('lista');
 
-    document.getElementById('filter-all-btn').onclick = () => {
-      STANJE.filter = 'svi';
-      STANJE.dnevnikPrikazano = 30;
-      document.getElementById('filter-all-btn').classList.add('active');
-      document.getElementById('filter-team-btn').classList.remove('active');
-      crtajPodatke();
-    };
+    document.getElementById('filter-all-btn').onclick = () => postaviFilter('', 0);
+    document.getElementById('map-scope-chip').onclick = () => postaviFilter('', 0);
+    document.getElementById('scope-team').onchange = e => postaviFilter(e.target.value, 0);
+    document.getElementById('scope-member').onchange = e => postaviFilter(STANJE.filterTim, Number(e.target.value) || 0);
 
     document.getElementById('filter-team-btn').onclick = () => {
       if (!STANJE.sesija || !STANJE.sesija.tim) {
@@ -3333,11 +3553,7 @@
         pripremiPrijavuPanel();
         return;
       }
-      STANJE.filter = 'tim';
-      STANJE.dnevnikPrikazano = 30;
-      document.getElementById('filter-team-btn').classList.add('active');
-      document.getElementById('filter-all-btn').classList.remove('active');
-      crtajPodatke();
+      postaviFilter(STANJE.sesija.tim, 0);
     };
 
     const listWrap = document.getElementById('list-wrap');
@@ -3593,6 +3809,8 @@
     }
     crtajPrivatnost();
     poveziDogadjaje();
+    primeniFilterIzAdrese();
+    if (STANJE.pogled === 'lista') postaviPogled('lista');
     primeniJezik();
     inicijalizujMapu();
 

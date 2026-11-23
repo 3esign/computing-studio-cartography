@@ -71,6 +71,7 @@
         <div class="map-fallback-banner" id="map-fallback" hidden>
           <span data-sr="3D prikaz mape nije dostupan na ovom uređaju — koristi prikaz Dnevnik za čitanje i + Novi zapis za unos." data-en="3D map is unavailable on this device — use Journal view to read and + New entry to record.">3D prikaz mape nije dostupan na ovom uređaju — koristi prikaz Dnevnik za čitanje i + Novi zapis za unos.</span>
         </div>
+        <button type="button" class="scope-chip" id="map-scope-chip" hidden></button>
         <div class="map-tools" aria-label="Kontrole mape">
           <button type="button" class="map-tool-btn" id="btn-my-loc" title="Moja lokacija" aria-label="Moja lokacija">⌖</button>
           <button type="button" class="map-tool-btn active" id="btn-toggle-3d" title="3D nagib zgrada" aria-label="3D ili 2D nagib">3D</button>
@@ -82,10 +83,21 @@
       <!-- Lista dnevnika -->
       <section class="list-wrap" id="list-wrap" aria-label="Hronološki urbani dnevnik" hidden>
         <div class="list-inner">
-          <article class="journal-intro-card">
+          <article class="journal-intro-card" id="journal-intro-card">
             <h2 data-sr="Urbani žurnal · Prva vežba: komšiluk i doživljaj prostora" data-en="Urban Journal · Exercise 1: Neighborhood & Spatial Experience">Urbani žurnal · Prva vežba: komšiluk i doživljaj prostora</h2>
             <p data-sr="Svaki tim bira jedan deo grada — komšiluk, blok ili naselje — koji istražuje, opisuje i otkriva. Prva vežba postavlja pitanje: kako zabeležiti doživljaj prostora, okruženja i kretanje kroz grad? Zapažanja svih članova tima i svih timova spajaju se ovde u živu mapu Beograda." data-en="Each team chooses one part of the city — a neighborhood, block, or settlement — to explore, describe, and discover. Exercise 1 asks: how can we capture the experience of space, surroundings, and movement through the city? Entries from all team members merge here into a shared map of Belgrade.">Svaki tim bira jedan deo grada — komšiluk, blok ili naselje — koji istražuje, opisuje i otkriva. Prva vežba postavlja pitanje: kako zabeležiti doživljaj prostora, okruženja i kretanje kroz grad? Zapažanja svih članova tima i svih timova spajaju se ovde u živu mapu Beograda.</p>
           </article>
+          <div class="scope-bar" id="journal-scope-bar">
+            <label class="scope-field">
+              <span data-sr="Tim" data-en="Team">Tim</span>
+              <select id="scope-team" aria-label="Izbor tima / Team"></select>
+            </label>
+            <label class="scope-field" id="scope-member-field" hidden>
+              <span data-sr="Član" data-en="Member">Član</span>
+              <select id="scope-member" aria-label="Izbor člana / Member"></select>
+            </label>
+          </div>
+          <article class="scope-card" id="journal-scope-card" hidden></article>
           <div id="journal-feed"></div>
         </div>
       </section>
@@ -334,13 +346,14 @@
   <div class="sheet-backdrop" id="modal-rank" role="dialog" aria-modal="true" aria-labelledby="rank-title" hidden>
     <div class="sheet">
       <div class="sheet-head">
-        <h2 id="rank-title" data-sr="Napredak i rang timova · Zadatak 1" data-en="Progress and team ranking · Task 1">Napredak i rang timova · Zadatak 1</h2>
+        <h2 id="rank-title" data-sr="Napredak, timovi i članovi · Zadatak 1" data-en="Progress, teams and members · Task 1">Napredak, timovi i članovi · Zadatak 1</h2>
         <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
       </div>
       <div class="sheet-body">
         <div class="rank-legend">
           <span data-sr="Količina: koliko članova tima ima svojih 15 zapisa. Zapisi jednog člana preko 15 ne popunjavaju tuđi deo. Član se broji po telefonu sa kog šalje." data-en="Quantity: how many team members have their 15 entries. One member's entries above 15 do not fill another member's share. A member is counted by the phone they send from.">Količina: koliko članova tima ima svojih 15 zapisa. Zapisi jednog člana preko 15 ne popunjavaju tuđi deo. Član se broji po telefonu sa kog šalje.</span><br>
           <span data-sr="Popunjenost: udeo zapisa po nivou; procenat je udeo nivoa 3." data-en="Completeness: share of entries by level; the percentage is the share of level 3.">Popunjenost: udeo zapisa po nivou; procenat je udeo nivoa 3.</span><br>
+          <span data-sr="Dodirni „Članovi“ da vidiš svakog člana tima, a ime člana ili „Dnevnik tima“ da otvoriš samo te zapise." data-en="Tap “Members” to see each team member, and a member's name or “Team journal” to open only those entries.">Dodirni „Članovi“ da vidiš svakog člana tima, a ime člana ili „Dnevnik tima“ da otvoriš samo te zapise.</span><br>
           <span class="key"><i class="l1"></i><span data-sr="1 · Osnovni" data-en="1 · Basic">1 · Osnovni</span></span>
           <span class="key"><i class="l2"></i><span data-sr="2 · Opisan" data-en="2 · Described">2 · Opisan</span></span>
           <span class="key"><i class="l3"></i><span data-sr="3 · Potpun" data-en="3 · Complete">3 · Potpun</span></span>
