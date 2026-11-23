@@ -1252,3 +1252,52 @@ button, input, textarea, select {
 .rank-bar.lvl > i.l3, .rank-legend .key i.l3 { background: #6b5313; }
 .rank-sub { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); line-height: 1.4; }
 .rank-empty { margin: 0; font-size: 12.5px; color: var(--ink-soft); }
+
+/* Baner za novu verziju aplikacije (izdanje 2026-11-23.4) */
+.update-banner {
+  position: fixed;
+  top: calc(48px + env(safe-area-inset-top, 0px));
+  left: max(10px, env(safe-area-inset-left, 0px));
+  right: max(10px, env(safe-area-inset-right, 0px));
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--ink);
+  border: 1px solid var(--warn);
+  box-shadow: 0 6px 18px rgba(31, 29, 24, 0.18);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.update-banner[hidden] { display: none; }
+.update-banner.obavezno {
+  background: var(--err-bg);
+  border-color: var(--err);
+}
+.update-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+}
+.update-banner-btn {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 13px;
+  min-height: 34px;
+  background: var(--ink);
+  color: #f8f6ef;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.update-banner.obavezno .update-banner-btn {
+  background: var(--err);
+  color: #fff;
+}

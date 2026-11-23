@@ -3,7 +3,8 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-23.3';
+  const VERZIJA_APP = '2026-11-23.4';
+  const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -43,7 +44,10 @@
     mapa: null,
     mapaSpremna: false,
     mapa3D: true,
-    korisnikMarker: null
+    korisnikMarker: null,
+    novaVerzijaDostupna: '',
+    obaveznoOsvezavanje: false,
+    swRegistracija: null
   };
 
   function procitajKolacicSesije() {
@@ -148,7 +152,10 @@
       saljeSeVeliki: 'Sačuvano u telefonu. Veliki prilog se šalje u pozadini; ostavi aplikaciju otvorenu dok ne stigne.',
       kopirano: 'Link je kopiran! Otvori Safari ili Chrome i nalepi ga u adresnu traku.',
       snimam: s => `Zaustavi (${s}s)`,
-      snimiZvuk: 'Snimi zvuk'
+      snimiZvuk: 'Snimi zvuk',
+      novaVerzijaBaner: 'Dostupna je nova verzija aplikacije. Osveži stranicu.',
+      obaveznoOsvezavanjeBaner: 'Ova kartica koristi staru verziju aplikacije. Osveži pre slanja zapisa.',
+      potrebnoOsvezavanje: 'Prvo osveži aplikaciju (dugme na vrhu ekrana) — zapisi ostaju sačuvani u telefonu.'
     },
     en: {
       uzivo: 'Live',
@@ -198,7 +205,10 @@
       saljeSeVeliki: 'Saved on your phone. The large attachment is uploading in the background; keep the app open until it arrives.',
       kopirano: 'Link copied! Open Safari or Chrome and paste it into the address bar.',
       snimam: s => `Stop (${s}s)`,
-      snimiZvuk: 'Record sound'
+      snimiZvuk: 'Record sound',
+      novaVerzijaBaner: 'A newer version of the app is available. Refresh the page.',
+      obaveznoOsvezavanjeBaner: 'This tab is running an outdated app version. Refresh before sending entries.',
+      potrebnoOsvezavanje: 'Please refresh the app first (button at the top) — your entries stay safe on your phone.'
     }
   };
 
@@ -223,7 +233,80 @@
     osveziZaglavljeSesije();
     osveziStatusTraku();
     osveziGpsPrikaz();
+    osveziBanerVerzije();
     crtajPodatke();
+  }
+
+  // --- Provera verzije aplikacije i automatsko osvežavanje zastarelih kartica ---
+  function uporediVerzijeApp(a, b) {
+    const pa = String(a || '').trim().split(/[.-]/).map(n => Number(n) || 0);
+    const pb = String(b || '').trim().split(/[.-]/).map(n => Number(n) || 0);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const da = pa[i] || 0;
+      const db = pb[i] || 0;
+      if (da !== db) return da < db ? -1 : 1;
+    }
+    return 0;
+  }
+
+  function osveziBanerVerzije() {
+    const baner = document.getElementById('update-banner');
+    const txt = document.getElementById('update-banner-text');
+    if (!baner || !txt) return;
+    if (!STANJE.obaveznoOsvezavanje && !STANJE.novaVerzijaDostupna) {
+      baner.hidden = true;
+      baner.classList.remove('obavezno');
+      return;
+    }
+    baner.classList.toggle('obavezno', Boolean(STANJE.obaveznoOsvezavanje));
+    txt.textContent = STANJE.obaveznoOsvezavanje ? t('obaveznoOsvezavanjeBaner') : t('novaVerzijaBaner');
+    baner.hidden = false;
+  }
+
+  async function osveziAplikaciju(ciljnaVerzija) {
+    try {
+      sessionStorage.setItem(SS_AUTO_RELOAD_V, String(ciljnaVerzija || STANJE.novaVerzijaDostupna || '1'));
+    } catch {}
+    try {
+      if (STANJE.swRegistracija && typeof STANJE.swRegistracija.update === 'function') {
+        await STANJE.swRegistracija.update();
+      }
+    } catch {}
+    try {
+      if ('caches' in window) {
+        const kljucevi = await caches.keys();
+        await Promise.all(kljucevi.filter(k => k.startsWith('uz-ljuska')).map(k => caches.delete(k)));
+      }
+    } catch {}
+    location.reload();
+  }
+
+  function kompozitorOtvoren() {
+    const m = document.getElementById('modal-composer');
+    return Boolean(m && !m.hidden);
+  }
+
+  function proveriVerzijuSaServera(podaci) {
+    if (!podaci || typeof podaci !== 'object') return;
+    const minV = String(podaci.min_verzija_app || '').trim();
+    const aktV = String(podaci.verzija_app || '').trim();
+    const mora = Boolean(minV && uporediVerzijeApp(VERZIJA_APP, minV) < 0);
+    const imaNova = Boolean(aktV && uporediVerzijeApp(VERZIJA_APP, aktV) < 0);
+    if (mora) STANJE.obaveznoOsvezavanje = true;
+    if (imaNova || mora) STANJE.novaVerzijaDostupna = aktV || minV || STANJE.novaVerzijaDostupna;
+    osveziBanerVerzije();
+
+    // Ako server zahteva noviju verziju, a student trenutno ne piše zapis niti traje slanje,
+    // jednokratno automatski osveži karticu (sa zaštitom od petlje u sessionStorage).
+    if (mora && !kompozitorOtvoren() && !STANJE.sinhronizacijaUToku) {
+      const cilj = aktV || minV;
+      let vecProbao = '';
+      try { vecProbao = sessionStorage.getItem(SS_AUTO_RELOAD_V) || ''; } catch {}
+      if (vecProbao !== cilj) {
+        osveziAplikaciju(cilj);
+      }
+    }
   }
 
   function toast(poruka) {
@@ -1258,6 +1341,11 @@
   }
 
   function otvoriKompozitor() {
+    if (STANJE.obaveznoOsvezavanje) {
+      osveziBanerVerzije();
+      toast(t('potrebnoOsvezavanje'));
+      return;
+    }
     if (!STANJE.sesija || !STANJE.sesija.tajna) {
       toast(t('potrebnaPrijava'));
       pripremiPrijavuPanel();
@@ -1596,6 +1684,10 @@
   }
 
   async function posaljiJedanIzReda(stavka) {
+    if (STANJE.obaveznoOsvezavanje) {
+      osveziBanerVerzije();
+      return { ishod: 'stara_verzija', poruka: t('potrebnoOsvezavanje') };
+    }
     const pril = stavka.prilozi || [];
     const bajtovi = [];
     const dn = {
@@ -1703,6 +1795,15 @@
     if (r.status === 400 || r.status === 403 || r.status === 413 || r.status === 422) {
       stavka.trajna_greska = (j && j.poruka) || `Server je odbio zapis (${r.status}).`;
       stavka.status_greske = r.status;
+      if (j && j.kod_greske === 'STARA_VERZIJA') {
+        stavka.stara_verzija = true;
+        delete stavka.prazno_telo;
+        await idbUpisiURed(stavka);
+        STANJE.obaveznoOsvezavanje = true;
+        proveriVerzijuSaServera(j);
+        return { ishod: 'stara_verzija', poruka: stavka.trajna_greska };
+      }
+      delete stavka.stara_verzija;
       if (j && j.kod_greske === 'PRAZNO_TELO') stavka.prazno_telo = true;
       else delete stavka.prazno_telo;
       await idbUpisiURed(stavka);
@@ -1896,7 +1997,7 @@
                 const rez = await posaljiUzBudanEkran(st);
                 if (rez.ishod === 'poslato') {
                   poslatoBarJedno = true;
-                } else if (rez.ishod === 'auth_pala') {
+                } else if (rez.ishod === 'auth_pala' || rez.ishod === 'stara_verzija') {
                   mrezniPrekid = true;
                   traziDodatniKrug = false;
                   toast(rez.poruka);
@@ -2017,6 +2118,7 @@
       if (!r.ok || mojGen < poslednjiPrimenjenGen) return;
       const j = await r.json();
       if (!j || !j.ok || mojGen < poslednjiPrimenjenGen) return;
+      proveriVerzijuSaServera(j);
       if (j.neizmenjeno) {
         if (j.etag) STANJE.poslednjiEtag = j.etag;
         return;
@@ -3143,6 +3245,8 @@
     }
 
     document.getElementById('btn-open-composer').onclick = otvoriKompozitor;
+    const btnUpd = document.getElementById('btn-update-app');
+    if (btnUpd) btnUpd.onclick = () => osveziAplikaciju(STANJE.novaVerzijaDostupna);
     document.getElementById('btn-submit-login').onclick = izvrsiPrijavu;
     document.getElementById('btn-scan-qr-cam').onclick = pokreniQrKameru;
     document.getElementById('btn-stop-qr-cam').onclick = zaustaviQrKameru;
@@ -3309,6 +3413,9 @@
         }
         pokreniGps(false);
         drziEkranBudnim();
+        if (STANJE.swRegistracija && typeof STANJE.swRegistracija.update === 'function') {
+          STANJE.swRegistracija.update().catch(() => {});
+        }
         sinhronizujRed();
         ucitajStanjeSaServera();
       }
@@ -3330,10 +3437,19 @@
     inicijalizujMapu();
 
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      navigator.serviceWorker.register('./sw.js').then(reg => { STANJE.swRegistracija = reg; }).catch(() => {});
     }
 
     STANJE.lokalniRed = await idbSviIzReda();
+    // Ako je zapis ranije odbijen zato što je stara kartica bila iz keša, nova verzija čisti tu blokadu da se zapis pošalje sam.
+    for (const st of STANJE.lokalniRed) {
+      if (st.stara_verzija || (st.status_greske === 422 && /zastarela|Stara verzija/i.test(st.trajna_greska || ''))) {
+        delete st.trajna_greska;
+        delete st.status_greske;
+        delete st.stara_verzija;
+        await idbUpisiURed(st);
+      }
+    }
     osveziStatusTraku();
 
     await razresiApiBazu(false);

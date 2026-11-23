@@ -1,7 +1,7 @@
 /* Urbani žurnal · Network-First Service Worker za offline otvaranje ljuske aplikacije na terenu */
 'use strict';
 
-const KES_NAZIV = 'uz-ljuska-v1';
+const KES_NAZIV = 'uz-ljuska-v2';
 const STATICKI_FAJLOVI = [
   './',
   './index.html',
@@ -50,7 +50,7 @@ self.addEventListener('fetch', event => {
   // tek ako je student u podzemnom prolazu/bloku bez signala, posluži poslednju keširanu ljusku aplikacije.
   event.respondWith((async () => {
     try {
-      const mrezniOdg = await fetch(req);
+      const mrezniOdg = await fetch(req, { cache: 'no-cache' });
       if (mrezniOdg && mrezniOdg.ok) {
         const kopija = mrezniOdg.clone();
         caches.open(KES_NAZIV).then(c => c.put(req, kopija)).catch(() => {});
