@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-23.2';
+  const VERZIJA_APP = '2026-11-23.3';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
   const KOLACIC_SESIJA = 'uz_sesija_c1';
@@ -109,6 +109,19 @@
       gpsTrazi: 'Tražim GPS lokaciju…',
       mestoIzSlike: 'Mesto zapisa je uzeto iz slike.',
       mestoIzSlikeKratko: 'mesto iz slike',
+      mestoIzVidea: 'Mesto zapisa je uzeto iz videa.',
+      mestoIzVideaKratko: 'mesto iz videa',
+      snimljenoKratko: 'snimljeno',
+      videoBezLokacije: ime => `Video „${ime}“ nije dodat jer u sebi nema lokaciju, pa ga ne možemo postaviti na mapu. Na licu mesta snimi dugmetom „Snimi video“. iPhone: u galeriji dodirni „Options“ (Opcije) i uključi „Location“ pre izbora videa. Android: galerija najčešće briše lokaciju, zato snimaj iz aplikacije.`,
+      nivoKratko: n => `nivo ${n}/3`,
+      nivoOpis: n => (n === 3 ? 'Potpun: prilog, tekst od najmanje 40 znakova i sloj doživljaja' : n === 2 ? 'Opisan: ima tekst od najmanje 40 znakova ili sloj doživljaja' : 'Osnovni: mesto i prilog'),
+      faliPrilog: 'prilog (slika, zvuk ili video)',
+      faliTekst: 'tekst od najmanje 40 znakova',
+      faliSloj: 'sloj doživljaja',
+      zaNivo3: fali => `Za nivo 3 još treba: ${fali}.`,
+      zaNivo3Uredi: fali => `Za nivo 3 još treba: ${fali}. Dopuni u Dnevniku dugmetom „Uredi“.`,
+      nivo3Dostignut: 'Zapis je potpun (nivo 3).',
+      rangDugme: 'Rang',
       slikaBezLokacije: ime => `Slika „${ime}“ nije dodata jer u sebi nema lokaciju, pa je ne možemo postaviti na mapu. Na licu mesta slikaj dugmetom „Slikaj“. iPhone: u galeriji dodirni „Options“ (Opcije) i uključi „Location“ pre izbora slike. Android: galerija najčešće briše lokaciju, zato slikaj iz aplikacije.`,
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `GPS grub (±${Math.round(m)} m)`,
@@ -146,6 +159,19 @@
       gpsTrazi: 'Acquiring GPS…',
       mestoIzSlike: 'Entry location was taken from the photo.',
       mestoIzSlikeKratko: 'location from photo',
+      mestoIzVidea: 'Entry location was taken from the video.',
+      mestoIzVideaKratko: 'location from video',
+      snimljenoKratko: 'taken',
+      videoBezLokacije: ime => `Video “${ime}” was not added because it carries no location, so it cannot be placed on the map. On site, use “Record video”. iPhone: in the gallery tap “Options” and turn on “Location” before choosing. Android: the gallery usually strips location, so record in the app.`,
+      nivoKratko: n => `level ${n}/3`,
+      nivoOpis: n => (n === 3 ? 'Complete: attachment, text of at least 40 characters and an experience layer' : n === 2 ? 'Described: has text of at least 40 characters or an experience layer' : 'Basic: place and attachment'),
+      faliPrilog: 'an attachment (photo, sound or video)',
+      faliTekst: 'text of at least 40 characters',
+      faliSloj: 'an experience layer',
+      zaNivo3: fali => `Level 3 still needs: ${fali}.`,
+      zaNivo3Uredi: fali => `Level 3 still needs: ${fali}. Add it in the Journal with “Edit”.`,
+      nivo3Dostignut: 'The entry is complete (level 3).',
+      rangDugme: 'Ranking',
       slikaBezLokacije: ime => `Photo “${ime}” was not added because it carries no location, so it cannot be placed on the map. On site, use “Take photo”. iPhone: in the gallery tap “Options” and turn on “Location” before choosing. Android: the gallery usually strips location, so take the photo in the app.`,
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `Coarse GPS (±${Math.round(m)} m)`,
@@ -623,7 +649,7 @@
   }
 
   // --- Jedinstveni upravljač panelima (uvek najviše jedan otvoren!) ---
-  const SVI_PANELI = ['modal-login', 'modal-info', 'modal-composer', 'modal-detail', 'modal-profile', 'modal-gps-help'];
+  const SVI_PANELI = ['modal-login', 'modal-info', 'modal-composer', 'modal-detail', 'modal-profile', 'modal-gps-help', 'modal-rank'];
 
   function otvoriPanel(id) {
     if (id !== 'modal-login') zaustaviQrKameru();
@@ -873,7 +899,7 @@
 
   // >>> exif-gps
   // Lokacija iz slike (EXIF GPS). Radi nad sirovim bajtovima JPEG/HEIC/WebP fajla pre nego što optimizacija obriše EXIF.
-  // Vraća { lat, lon, tacnost_m } ili null. iPhone šalje GPS samo za sliku iz galerije kad je u biraču pod „Options“
+  // Vraća { lat, lon, tacnost_m, vreme? } ili null (vreme = trenutak snimanja, ISO UTC, kad ga slika nosi). iPhone šalje GPS samo za sliku iz galerije kad je u biraču pod „Options“
   // uključena lokacija; Android birač slika lokaciju briše pre stranice, pa tamo po pravilu vraća null.
   function gpsIzExifBajtova(u8) {
     if (!u8 || u8.length < 16) return null;
@@ -927,7 +953,37 @@
       if (Math.abs(lat) < 1e-6 && Math.abs(lon) < 1e-6) return null;
       const greska = racionalni(nadjiUnos(gps, 0x1F), 1); // GPSHPositioningError, metri
       const tacnost = greska && greska[0] > 0 ? Math.min(500, Math.max(3, Math.round(greska[0]))) : 30;
-      return { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6, tacnost_m: tacnost };
+      // Vreme snimanja: DateTimeOriginal (+ OffsetTimeOriginal) iz Exif pod-IFD-a; bez zone važi zona telefona.
+      // Rezerva je GPS datum i vreme iz slike (UTC). Vraća se kao `vreme` (ISO, UTC) samo kad je pročitano.
+      const ascii = (e, najvise) => {
+        if (e < 0 || u16(e + 2) !== 2) return '';
+        const n = Math.min(u32(e + 4), najvise);
+        const o = n <= 4 ? e + 8 : tiff + u32(e + 8);
+        if (o < 0 || o + n > kraj) return '';
+        let s = '';
+        for (let i = 0; i < n && u8[o + i]; i++) s += String.fromCharCode(u8[o + i]);
+        return s.trim();
+      };
+      let vremeMs = NaN;
+      const eExif = nadjiUnos(tiff + u32(tiff + 4), 0x8769);
+      if (eExif >= 0) {
+        const exif = tiff + u32(eExif + 8);
+        const dto = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(ascii(nadjiUnos(exif, 0x9003), 20));
+        if (dto) {
+          const zona = /^[+-]\d{2}:\d{2}$/.exec(ascii(nadjiUnos(exif, 0x9011), 7));
+          vremeMs = zona
+            ? Date.parse(`${dto[1]}-${dto[2]}-${dto[3]}T${dto[4]}:${dto[5]}:${dto[6]}${zona[0]}`)
+            : new Date(+dto[1], +dto[2] - 1, +dto[3], +dto[4], +dto[5], +dto[6]).getTime();
+        }
+      }
+      if (Number.isNaN(vremeMs)) {
+        const dat = /^(\d{4}):(\d{2}):(\d{2})$/.exec(ascii(nadjiUnos(gps, 0x1D), 11));
+        const sat = racionalni(nadjiUnos(gps, 7), 3);
+        if (dat && sat) vremeMs = Date.UTC(+dat[1], +dat[2] - 1, +dat[3], Math.floor(sat[0]), Math.floor(sat[1]), Math.floor(sat[2]));
+      }
+      const rez = { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6, tacnost_m: tacnost };
+      if (Number.isFinite(vremeMs) && vremeMs > 946684800000 && vremeMs < 4102444800000) rez.vreme = new Date(vremeMs).toISOString();
+      return rez;
     };
     // "Exif\0\0" + TIFF (JPEG APP1, HEIC Exif stavka) ili "EXIF" + dužina + TIFF (WebP)
     for (let i = 0; i + 14 < kraj; i++) {
@@ -948,6 +1004,70 @@
     } catch {
       return null;
     }
+  }
+
+  // >>> video-meta
+  // Mesto i vreme iz video fajla iz galerije (MP4/MOV), čitano iz atoma `moov`. Lokacija je ISO 6709 zapis
+  // („+44.8202+020.4620/“): iPhone ga piše pod ključem com.apple.quicktime.location.ISO6709, Android u `©xyz`.
+  // Vreme: Apple creationdate (sa zonom) ili creation_time iz `mvhd` (sekunde od 1904, UTC).
+  // Vraća { lat, lon, tacnost_m, izvor: 'video', vreme? } ili null. Da li birač galerije ostavlja ove podatke zavisi od telefona.
+  function metaIzMoovBajtova(u8) {
+    if (!u8 || u8.length < 16) return null;
+    let s = '';
+    for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+    const m = /([+-]\d{2}\.\d{2,})([+-]\d{3}\.\d{2,})(?:[+-]\d+(?:\.\d+)?)?(?:CRS[A-Za-z0-9_]+)?\//.exec(s);
+    if (!m) return null;
+    const lat = Number(m[1]);
+    const lon = Number(m[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    if (Math.abs(lat) < 1e-6 && Math.abs(lon) < 1e-6) return null;
+    const rez = { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6, tacnost_m: 30, izvor: 'video' };
+    let ms = NaN;
+    const d = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})/.exec(s);
+    if (d) ms = Date.parse(d[1] + (d[2] === 'Z' ? 'Z' : d[2].slice(0, 3) + ':' + d[2].slice(-2)));
+    if (Number.isNaN(ms)) {
+      const i = s.indexOf('mvhd');
+      if (i >= 0 && i + 20 <= u8.length) {
+        const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+        const sek = u8[i + 4] === 1 ? dv.getUint32(i + 8) * 4294967296 + dv.getUint32(i + 12) : dv.getUint32(i + 8);
+        const kandidat = (sek - 2082844800) * 1000;
+        if (kandidat > 1104537600000) ms = kandidat; // posle 2005; nula u zaglavlju znači da vreme nije upisano
+      }
+    }
+    if (Number.isFinite(ms) && ms > 946684800000 && ms < 4102444800000) rez.vreme = new Date(ms).toISOString();
+    return rez;
+  }
+  // <<< video-meta
+
+  // Prolazi kroz atome najvišeg nivoa samo po zaglavljima (16 bajtova po atomu), pa čita `moov` (najviše 6 MB).
+  async function procitajMetaIzVidea(fajl) {
+    try {
+      if (!fajl || !fajl.size) return null;
+      let poz = 0;
+      for (let k = 0; k < 200 && poz + 8 <= fajl.size; k++) {
+        const zag = new DataView(await procitajBajtovePriloga(fajl.slice(poz, poz + 16)));
+        if (zag.byteLength < 8) return null;
+        let duz = zag.getUint32(0);
+        const tip = String.fromCharCode(zag.getUint8(4), zag.getUint8(5), zag.getUint8(6), zag.getUint8(7));
+        if (duz === 1 && zag.byteLength >= 16) duz = zag.getUint32(8) * 4294967296 + zag.getUint32(12);
+        else if (duz === 0) duz = fajl.size - poz;
+        if (duz < 8) return null;
+        if (tip === 'moov') {
+          const deo = fajl.slice(poz, poz + Math.min(duz, 6 * 1024 * 1024));
+          return metaIzMoovBajtova(new Uint8Array(await procitajBajtovePriloga(deo)));
+        }
+        poz += duz;
+      }
+    } catch {}
+    return null;
+  }
+
+  // Vreme nastanka priloga koji je dao mesto (slika ili video iz galerije). Prazno = važi vreme čuvanja.
+  function vremeSnimkaIzPriloga(g) {
+    if (!g || !g.vreme) return '';
+    const ms = Date.parse(g.vreme);
+    if (Number.isNaN(ms) || ms > Date.now() + 10 * 60 * 1000 || ms < 946684800000) return '';
+    return new Date(ms).toISOString();
   }
 
   function gpsIzPrilogaKompozitora() {
@@ -1108,11 +1228,14 @@
     const timTxt = STANJE.sesija ? `${STANJE.sesija.tim} · ${STANJE.sesija.nadimak || STANJE.sesija.oznaka}` : 'Nije prijavljen';
     const izSlike = gpsIzPrilogaKompozitora();
     const gpsTxt = izSlike
-      ? `${t('mestoIzSlikeKratko')}: ${izSlike.lat.toFixed(5)}, ${izSlike.lon.toFixed(5)} (±${izSlike.tacnost_m} m)`
+      ? `${t(izSlike.izvor === 'video' ? 'mestoIzVideaKratko' : 'mestoIzSlikeKratko')}: ${izSlike.lat.toFixed(5)}, ${izSlike.lon.toFixed(5)} (±${izSlike.tacnost_m} m)`
       : STANJE.gps
       ? `${STANJE.gps.lat.toFixed(5)}, ${STANJE.gps.lon.toFixed(5)} (±${STANJE.gps.tacnost_m} m)`
       : t('gpsTrazi');
-    const sadTxt = new Date().toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' });
+    const vremeIzPriloga = vremeSnimkaIzPriloga(izSlike);
+    const sadTxt = vremeIzPriloga
+      ? `${t('snimljenoKratko')} ${formatVreme(vremeIzPriloga)}`
+      : new Date().toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' });
     const vezbaTxt = STANJE.jezik === 'en' ? `Exercise ${STANJE.aktivnaNedelja}` : `Vežba ${STANJE.aktivnaNedelja}`;
     el.innerHTML = `<span><strong>${esc(timTxt)}</strong></span> · <span>${esc(vezbaTxt)}</span> · <span>${esc(gpsTxt)}</span> · <span>${esc(sadTxt)}</span>`;
   }
@@ -1271,8 +1394,11 @@
         lon: mesto.lon,
         tacnost_m: mesto.tacnost_m,
         radijus_m: Math.min(25, Math.max(5, Math.round(mesto.tacnost_m))),
-        izvor_lokacije: gpsSlike ? 'slika' : 'uredjaj',
+        izvor_lokacije: gpsSlike ? (gpsSlike.izvor === 'video' ? 'video' : 'slika') : 'uredjaj',
         vreme_telefona: new Date().toISOString(),
+        // Kad je slika ili video iz galerije snimljen; prazno znači da važi vreme čuvanja.
+        vreme_snimka: vremeSnimkaIzPriloga(gpsSlike),
+        izvor_vremena: vremeSnimkaIzPriloga(gpsSlike) ? (gpsSlike.izvor === 'video' ? 'video' : 'slika') : 'uredjaj',
         tekst,
         prilozi: STANJE.kompozitorPrilozi.map(p => ({
           vrsta: p.vrsta,
@@ -1345,11 +1471,15 @@
       ['lat', String(stavka.lat)],
       ['lon', String(stavka.lon)],
       ['tacnost_m', String(stavka.tacnost_m)],
-      ['izvor_lokacije', stavka.izvor_lokacije === 'slika' ? 'slika' : 'uredjaj'],
+      ['izvor_lokacije', stavka.izvor_lokacije === 'slika' || stavka.izvor_lokacije === 'video' ? stavka.izvor_lokacije : 'uredjaj'],
       ['vreme_telefona', stavka.vreme_telefona],
       ['nadimak', stavka.nadimak || ''],
       ['tekst', stavka.tekst || '']
     ];
+    if (stavka.vreme_snimka) {
+      polja.push(['vreme_snimka', stavka.vreme_snimka]);
+      polja.push(['izvor_vremena', stavka.izvor_vremena === 'video' ? 'video' : 'slika']);
+    }
     for (let i = 0; i < pril.length; i++) {
       polja.push([`sirina_${i}`, String(pril[i].sirina || 0)]);
       polja.push([`visina_${i}`, String(pril[i].visina || 0)]);
@@ -1606,6 +1736,7 @@
       'Tim: ' + (st.tim || ''),
       'Autor: ' + (st.nadimak || st.oznaka_uredjaja || ''),
       'Vreme telefona: ' + (st.vreme_telefona || ''),
+      ...(st.vreme_snimka ? ['Vreme snimka: ' + st.vreme_snimka] : []),
       'GPS: ' + st.lat + ', ' + st.lon + ' (±' + Math.round(Number(st.tacnost_m) || 0) + ' m)',
       'Nedelja: ' + (st.nedelja || 1),
       'Kategorije: ' + (st.kategorije || []).join(', '),
@@ -1848,12 +1979,12 @@
     }
   }
 
-  async function sacuvajIzmenuSopstvenogZapisa(zapisId, noviTekst) {
+  async function sacuvajIzmenuSopstvenogZapisa(zapisId, noviTekst, kategorije) {
     try {
       const r = await apiPoziv('/api/zapisi/' + encodeURIComponent(zapisId), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tekst: noviTekst })
+        body: JSON.stringify(Array.isArray(kategorije) ? { tekst: noviTekst, kategorije } : { tekst: noviTekst })
       });
       const j = await r.json();
       if (!r.ok || !j.ok) {
@@ -1937,7 +2068,7 @@
         lon: q.lon,
         tacnost_m: q.tacnost_m,
         radijus_m: q.radijus_m,
-        vreme: q.vreme_telefona,
+        vreme: q.vreme_snimka || q.vreme_telefona,
         tekst: q.tekst,
         prilozi: (q.prilozi || []).map(p => ({
           vrsta: p.vrsta,
@@ -1971,9 +2102,151 @@
     if (!iso) return '';
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString(STANJE.jezik === 'en' ? 'en-GB' : 'sr-RS', {
-      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
-    });
+    // Godina se ispisuje samo kad nije tekuća: slika iz galerije može biti starija od vežbe i to mora da se vidi.
+    const opcije = { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' };
+    if (d.getFullYear() !== new Date().getFullYear()) opcije.year = 'numeric';
+    return d.toLocaleString(STANJE.jezik === 'en' ? 'en-GB' : 'sr-RS', opcije);
+  }
+
+  // --- Zadatak 1: minimum po članu, tri nivoa popunjenosti i rang timova ---
+  // Isto pravilo nivoa je na serveru (server/lib/stanje.cjs, nivoZapisa); menjaju se zajedno.
+  function nivoZapisa(z) {
+    const imaTekst = String((z && z.tekst) || '').trim().length >= 40;
+    const imaSloj = Array.isArray(z && z.kategorije) && z.kategorije.length > 0;
+    const imaPrilog = Array.isArray(z && z.prilozi) && z.prilozi.length > 0;
+    if (imaTekst && imaSloj && imaPrilog) return 3;
+    return imaTekst || imaSloj ? 2 : 1;
+  }
+
+  function staFaliZaNivo3(tekst, kategorije, brojPriloga) {
+    const fali = [];
+    if (!brojPriloga) fali.push(t('faliPrilog'));
+    if (String(tekst || '').trim().length < 40) fali.push(t('faliTekst'));
+    if (!kategorije || !kategorije.length) fali.push(t('faliSloj'));
+    return fali;
+  }
+
+  function htmlNivoa(z) {
+    const n = nivoZapisa(z);
+    return `<span class="lvl-badge lvl-${n}" title="${esc(t('nivoOpis', n))}"><span class="lvl-dots" aria-hidden="true">${'●'.repeat(n)}${'○'.repeat(3 - n)}</span> ${esc(t('nivoKratko', n))}</span>`;
+  }
+
+  function htmlCipoviSloja(izabrani) {
+    const skup = new Set(izabrani || []);
+    const poznati = Array.from(document.querySelectorAll('#comp-tags .choice-chip'))
+      .map(c => ({ tag: c.getAttribute('data-tag'), naziv: c.textContent }));
+    for (const k of skup) {
+      if (!poznati.some(p => p.tag === k)) poznati.push({ tag: k, naziv: k });
+    }
+    return poznati.map(p =>
+      `<button type="button" class="choice-chip ${skup.has(p.tag) ? 'selected' : ''}" data-edit-tag="${esc(p.tag)}">${esc(p.naziv)}</button>`
+    ).join('');
+  }
+
+  function minimumPoClanu() {
+    return Number(STANJE.serverStatistika && STANJE.serverStatistika.minimum_po_clanu) || 15;
+  }
+
+  // „Član“ je telefon: broje se zapisi Zadatka 1 poslati sa ovog uređaja koji su stigli na server.
+  function mojNapredak() {
+    if (!STANJE.sesija || !STANJE.sesija.uredjaj_id) return null;
+    const mojId = Number(STANJE.sesija.uredjaj_id);
+    const nivoi = [0, 0, 0];
+    let zapisa = 0;
+    for (const z of STANJE.serverZapisi) {
+      if (Number(z.uredjaj_id) !== mojId || Number(z.nedelja || 1) !== 1) continue;
+      zapisa++;
+      nivoi[nivoZapisa(z) - 1]++;
+    }
+    return { zapisa, nivoi };
+  }
+
+  function osveziRangCip() {
+    const lbl = document.getElementById('rang-label');
+    const btn = document.getElementById('btn-rang');
+    if (!lbl || !btn) return;
+    const ja = mojNapredak();
+    const min = minimumPoClanu();
+    lbl.textContent = ja ? `${ja.zapisa}/${min}` : t('rangDugme');
+    btn.classList.toggle('done', Boolean(ja && ja.zapisa >= min));
+  }
+
+  function crtajRangListu() {
+    const telo = document.getElementById('rank-body');
+    if (!telo) return;
+    const en = STANJE.jezik === 'en';
+    const min = minimumPoClanu();
+    const st = STANJE.serverStatistika || {};
+    const poTimu = st.po_timu || {};
+    const procenat = (a, b) => (b > 0 ? Math.max(0, Math.min(100, (a / b) * 100)) : 0);
+    const nivoiTxt = n => (en
+      ? `level 1: ${n[0]} · level 2: ${n[1]} · level 3: ${n[2]}`
+      : `nivo 1: ${n[0]} · nivo 2: ${n[1]} · nivo 3: ${n[2]}`);
+    const trakaNivoa = n => {
+      const uk = n[0] + n[1] + n[2];
+      return `<div class="rank-bar lvl" role="img" aria-label="${esc(nivoiTxt(n))}">${[0, 1, 2].map(i =>
+        (n[i] > 0 ? `<i class="l${i + 1}" style="width:${procenat(n[i], uk).toFixed(1)}%"></i>` : '')).join('')}</div>`;
+    };
+
+    let html = '';
+    const ja = mojNapredak();
+    if (ja) {
+      const fali = Math.max(0, min - ja.zapisa);
+      html += `
+        <section class="rank-me">
+          <strong>${esc(en ? 'My progress · Task 1' : 'Moj napredak · Zadatak 1')}</strong>
+          <div class="rank-line">
+            <div class="rank-bar"><i style="width:${procenat(ja.zapisa, min).toFixed(1)}%"></i></div>
+            <span class="rank-num">${ja.zapisa}/${min}</span>
+          </div>
+          <div class="rank-sub">${esc(fali > 0
+            ? (en ? `${fali} more to complete the task` : `još ${fali} do kompletnog zadatka`)
+            : (en ? 'Task complete ✓' : 'Zadatak je kompletan ✓'))}</div>
+          ${ja.zapisa > 0 ? `<div class="rank-line">${trakaNivoa(ja.nivoi)}</div><div class="rank-sub">${esc(nivoiTxt(ja.nivoi))}</div>` : ''}
+        </section>`;
+    }
+
+    const redovi = Object.keys(poTimu)
+      .filter(k => poTimu[k] && poTimu[k].zadatak && Array.isArray(poTimu[k].zadatak.nivoi))
+      .map(k => {
+        const z = poTimu[k].zadatak;
+        const uk = z.nivoi[0] + z.nivoi[1] + z.nivoi[2];
+        return { tim: k, z, uk, udeoClanova: procenat(z.ispunilo, z.clanova), udeoCilja: procenat(z.napredak, z.cilj), udeo3: procenat(z.nivoi[2], uk) };
+      })
+      .filter(r => r.uk > 0);
+    // Redosled: prvo koliko je članova ispunilo minimum, pa koliko je tim blizu cilja, pa udeo potpunih zapisa.
+    redovi.sort((a, b) =>
+      b.udeoClanova - a.udeoClanova || b.udeoCilja - a.udeoCilja || b.udeo3 - a.udeo3 || b.uk - a.uk || a.tim.localeCompare(b.tim));
+
+    if (!redovi.length) {
+      html += `<p class="rank-empty">${esc(Object.keys(poTimu).length
+        ? (en ? 'The ranking will appear as soon as the server is updated.' : 'Rang-lista će se pojaviti čim se server osveži.')
+        : (en ? 'No entries yet.' : 'Još nema zapisa.'))}</p>`;
+    } else {
+      const mojTim = STANJE.sesija && STANJE.sesija.tim;
+      html += `<ol class="rank-list">${redovi.map((r, i) => `
+        <li class="rank-row ${r.tim === mojTim ? 'mine' : ''}">
+          <div class="rank-head">
+            <span class="rank-pos">${i + 1}</span>
+            <span class="entry-team-badge">${esc(r.tim)}</span>
+            <span class="rank-members">${r.z.ispunilo}/${r.z.clanova} ${esc(en ? 'members done' : 'članova ispunilo')}${r.z.ispunilo >= r.z.clanova ? ' ✓' : ''}</span>
+          </div>
+          <div class="rank-line">
+            <span class="rank-cap">${esc(en ? 'Quantity' : 'Količina')}</span>
+            <div class="rank-bar"><i style="width:${r.udeoCilja.toFixed(1)}%"></i></div>
+            <span class="rank-num">${r.z.napredak}/${r.z.cilj}</span>
+          </div>
+          <div class="rank-line">
+            <span class="rank-cap">${esc(en ? 'Completeness' : 'Popunjenost')}</span>
+            ${trakaNivoa(r.z.nivoi)}
+            <span class="rank-num">${Math.round(r.udeo3)}%</span>
+          </div>
+          <div class="rank-sub">${esc((en ? `entries ${r.uk} · ` : `zapisa ${r.uk} · `) + nivoiTxt(r.z.nivoi))}</div>
+        </li>`).join('')}</ol>`;
+      const bez = Math.max(0, (Number(st.timova_ukupno) || 0) - redovi.length);
+      if (bez > 0) html += `<p class="rank-empty">${esc(en ? `${bez} more teams have no entries yet.` : `Još ${bez} timova nema nijedan zapis.`)}</p>`;
+    }
+    telo.innerHTML = html;
   }
 
   function htmlPriloziZapisa(prilozi, uDetalju = false) {
@@ -2033,6 +2306,9 @@
   function crtajPodatke(prisilno = false) {
     const zapisi = sviVidljiviZapisi();
     document.getElementById('count-entries').textContent = String(zapisi.length);
+    osveziRangCip();
+    const rangPanel = document.getElementById('modal-rank');
+    if (rangPanel && !rangPanel.hidden) crtajRangListu();
 
     // Metrika otkrivenosti (m²)
     let m2 = STANJE.serverStatistika.otkriveno_m2_ukupno || 0;
@@ -2116,7 +2392,7 @@
             <div class="inline-edit-holder" data-edit-holder="${esc(z.id)}" hidden></div>
             ${htmlPriloziZapisa(z.prilozi, false)}
             <div class="entry-foot">
-              <span>±${Math.round(z.tacnost_m || 12)} m · R=${Math.round(z.radijus_m || 12)} m</span>
+              <span class="entry-foot-meta"><span>±${Math.round(z.tacnost_m || 12)} m · R=${Math.round(z.radijus_m || 12)} m</span>${htmlNivoa(z)}</span>
               <div class="entry-foot-actions">
                 ${akcijeReda}
                 <button type="button" class="link-btn" data-goto-idx="${idx}">${esc(t('prikaziNaMapi'))}</button>
@@ -2166,16 +2442,29 @@
           holder.innerHTML = `
             <div class="inline-edit-box">
               <textarea class="textarea" rows="3" maxlength="2000">${esc(z.tekst || '')}</textarea>
+              <div class="chip-grid">${htmlCipoviSloja(z.kategorije)}</div>
+              <div class="edit-hint" data-edit-hint></div>
               <div style="display:flex;gap:6px;justify-content:flex-end">
                 <button type="button" class="btn-secondary" data-cancel-ed style="padding:6px 12px;min-height:34px">Otkaži</button>
                 <button type="button" class="btn-primary" data-save-ed style="width:auto;padding:6px 14px;min-height:34px">Sačuvaj</button>
               </div>
             </div>
           `;
+          const osveziSavet = () => {
+            const kat = holder.querySelectorAll('.choice-chip.selected');
+            const fali = staFaliZaNivo3(holder.querySelector('textarea').value, Array.from(kat), (z.prilozi || []).length);
+            holder.querySelector('[data-edit-hint]').textContent = fali.length ? t('zaNivo3', fali.join(', ')) : t('nivo3Dostignut');
+          };
+          holder.querySelectorAll('[data-edit-tag]').forEach(c => {
+            c.onclick = () => { c.classList.toggle('selected'); osveziSavet(); };
+          });
+          holder.querySelector('textarea').addEventListener('input', osveziSavet);
+          osveziSavet();
           holder.querySelector('[data-cancel-ed]').onclick = () => { holder.hidden = true; holder.innerHTML = ''; };
           holder.querySelector('[data-save-ed]').onclick = async () => {
             const val = holder.querySelector('textarea').value.trim();
-            await sacuvajIzmenuSopstvenogZapisa(zid, val);
+            const kat = Array.from(holder.querySelectorAll('.choice-chip.selected')).map(c => c.getAttribute('data-edit-tag'));
+            await sacuvajIzmenuSopstvenogZapisa(zid, val, kat);
           };
         };
       });
@@ -2237,8 +2526,10 @@
       ${prekidacHtml}
       <div class="meta-strip">
         <span>${esc(formatVreme(z.vreme))}</span> ·
-        <span>GPS ${Number(z.lat).toFixed(5)}, ${Number(z.lon).toFixed(5)} (±${Math.round(z.tacnost_m || 12)} m)</span>
+        <span>GPS ${Number(z.lat).toFixed(5)}, ${Number(z.lon).toFixed(5)} (±${Math.round(z.tacnost_m || 12)} m)</span> ·
+        ${htmlNivoa(z)}
       </div>
+      ${jeMojServerZapis(z) && nivoZapisa(z) < 3 ? `<div class="edit-hint">${esc(t('zaNivo3Uredi', staFaliZaNivo3(z.tekst, z.kategorije, (z.prilozi || []).length).join(', ')))}</div>` : ''}
       ${z.uTelefonu ? `<div class="alert-box ${z.trajna_greska ? 'err' : 'warn'}">${esc(z.trajna_greska || t('uTelefonuOznaka'))}</div>` : ''}
       ${tagHtml}
       ${z.tekst ? `<p class="entry-text">${esc(z.tekst)}</p>` : ''}
@@ -2690,6 +2981,11 @@
     };
 
     document.getElementById('btn-info').onclick = () => otvoriPanel('modal-info');
+    document.getElementById('btn-rang').onclick = () => {
+      crtajRangListu();
+      otvoriPanel('modal-rank');
+      ucitajStanjeSaServera(true);
+    };
 
     document.getElementById('btn-profil').onclick = async () => {
       if (!STANJE.sesija || !STANJE.sesija.tajna) {
@@ -2933,12 +3229,13 @@
         }
       }
     };
-    const dodajSnimak = f => {
+    const jeZvukFajl = f => (f.type || '').startsWith('audio/') || /\.(mp3|m4a|ogg|opus|wav|aac)$/i.test(f.name || '');
+    const dodajSnimak = (f, gpsSlike) => {
       if (f.size > 90 * 1024 * 1024) {
         toast('Fajl prelazi 90 MB. Snimi kraći video (do 60 sekundi).');
         return;
       }
-      const jeZvuk = (f.type || '').startsWith('audio/') || /\.(mp3|m4a|ogg|opus|wav|aac)$/i.test(f.name || '');
+      const jeZvuk = jeZvukFajl(f);
       dodajPrilogUKompozitor({
         vrsta: jeZvuk ? 'zvuk' : 'video',
         ime: f.name || (jeZvuk ? 'zvuk.m4a' : 'video.mp4'),
@@ -2946,7 +3243,8 @@
         blob: f,
         sirina: 0,
         visina: 0,
-        trajanje: 0
+        trajanje: 0,
+        gpsSlike: gpsSlike || null
       });
     };
     const jeSlika = f => (f.type || '').startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|avif|bmp|tiff?|gif)$/i.test(f.name || '');
@@ -2975,7 +3273,24 @@
           document.getElementById('comp-error').hidden = true;
           await dodajSliku(f, gpsSlike);
           if (gpsSlike && !imaoMesto && gpsIzPrilogaKompozitora()) toast(t('mestoIzSlike'));
-        } else dodajSnimak(f);
+        } else if (jeZvukFajl(f)) {
+          dodajSnimak(f);
+        } else {
+          // Od izdanja 2026-11-23.3: video iz galerije mora u sebi nositi lokaciju, kao slika; inače bi završio na mestu slanja.
+          // Video snimljen dugmetom „Snimi video“ nastaje ovde i sada, pa važi GPS telefona.
+          const imaoMesto = Boolean(gpsIzPrilogaKompozitora());
+          const metaVidea = await procitajMetaIzVidea(f);
+          const errEl = document.getElementById('comp-error');
+          if (!metaVidea) {
+            errEl.textContent = t('videoBezLokacije', f.name || 'video');
+            errEl.hidden = false;
+            if (errEl.scrollIntoView) errEl.scrollIntoView({ block: 'nearest' });
+            continue;
+          }
+          errEl.hidden = true;
+          dodajSnimak(f, metaVidea);
+          if (!imaoMesto && gpsIzPrilogaKompozitora()) toast(t('mestoIzVidea'));
+        }
       }
     };
 

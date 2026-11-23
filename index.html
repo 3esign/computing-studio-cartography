@@ -97,6 +97,9 @@
         <span class="dot warn" id="gps-dot"></span>
         <span class="gps-label" id="gps-label" data-sr="Tražim GPS lokaciju…" data-en="Acquiring GPS…">Tražim GPS lokaciju…</span>
       </button>
+      <button type="button" class="rank-chip" id="btn-rang" title="Napredak i rang timova" aria-label="Napredak i rang timova / Progress and team ranking">
+        <span aria-hidden="true">▤</span><span id="rang-label">Rang</span>
+      </button>
       <button type="button" class="btn-new-entry" id="btn-open-composer">
         <span aria-hidden="true">＋</span>
         <span data-sr="Novi zapis" data-en="New entry">Novi zapis</span>
@@ -210,9 +213,23 @@
             <li data-sr="Slika dugmetom „Slikaj“: mesto telefona. Ovo je najsigurniji način i radi na svakom telefonu." data-en="Photo with “Take photo”: the phone's position. The safest way; works on every phone.">Slika dugmetom „Slikaj“: mesto telefona. Ovo je najsigurniji način i radi na svakom telefonu.</li>
             <li data-sr="Slika iz galerije: mesto upisano u samoj slici. Slika bez lokacije se ne prima. iPhone: u galeriji dodirni „Options“ i uključi „Location“. Android: galerija najčešće briše lokaciju, zato slikaj iz aplikacije." data-en="Photo from gallery: the location stored in the photo. A photo without location is not accepted. iPhone: in the gallery tap “Options” and turn on “Location”. Android: the gallery usually strips location, so take photos in the app.">Slika iz galerije: mesto upisano u samoj slici. Slika bez lokacije se ne prima. iPhone: u galeriji dodirni „Options“ i uključi „Location“. Android: galerija najčešće briše lokaciju, zato slikaj iz aplikacije.</li>
             <li data-sr="Zvuk: mesto telefona u trenutku čuvanja. Snimi i sačuvaj na istom mestu." data-en="Sound: the phone's position when you save. Record and save at the same spot.">Zvuk: mesto telefona u trenutku čuvanja. Snimi i sačuvaj na istom mestu.</li>
-            <li data-sr="Video (snimljen ili iz galerije): mesto telefona u trenutku čuvanja, do 60 s. Sačuvaj ga pre nego što odeš sa mesta." data-en="Video (recorded or from gallery): the phone's position when you save, up to 60 s. Save before you leave the spot.">Video (snimljen ili iz galerije): mesto telefona u trenutku čuvanja, do 60 s. Sačuvaj ga pre nego što odeš sa mesta.</li>
+            <li data-sr="Video dugmetom „Snimi video“: mesto telefona u trenutku čuvanja, do 60 s. Sačuvaj ga pre nego što odeš sa mesta." data-en="Video with “Record video”: the phone's position when you save, up to 60 s. Save before you leave the spot.">Video dugmetom „Snimi video“: mesto telefona u trenutku čuvanja, do 60 s. Sačuvaj ga pre nego što odeš sa mesta.</li>
+            <li data-sr="Video iz galerije: mesto upisano u samom videu. Video bez lokacije se ne prima; tada snimi iz aplikacije." data-en="Video from gallery: the location stored in the video. A video without location is not accepted; record in the app instead.">Video iz galerije: mesto upisano u samom videu. Video bez lokacije se ne prima; tada snimi iz aplikacije.</li>
+            <li data-sr="Vreme: uz sliku ili video iz galerije stoji vreme kad su snimljeni, a ne kad su poslati. Za sve ostalo važi trenutak čuvanja." data-en="Time: a gallery photo or video shows when it was taken, not when it was sent. Everything else uses the moment of saving.">Vreme: uz sliku ili video iz galerije stoji vreme kad su snimljeni, a ne kad su poslati. Za sve ostalo važi trenutak čuvanja.</li>
           </ul>
           <span data-sr="Pre čuvanja pogledaj traku na vrhu zapisa: tu piše koje mesto će biti upisano." data-en="Before saving, check the strip at the top of the entry: it shows which place will be recorded.">Pre čuvanja pogledaj traku na vrhu zapisa: tu piše koje mesto će biti upisano.</span>
+        </div>
+
+        <div class="alert-box info">
+          <strong data-sr="Zadatak 1: najmanje 15 zapisa po članu tima" data-en="Task 1: at least 15 entries per team member">Zadatak 1: najmanje 15 zapisa po članu tima</strong>
+          <ul class="level-list">
+            <li data-sr="Zadatak je za tebe kompletan kad pošalješ najmanje 15 zapisa. Broji se svaki zapis sa tvog telefona." data-en="The task is complete for you once you have sent at least 15 entries. Every entry from your phone counts.">Zadatak je za tebe kompletan kad pošalješ najmanje 15 zapisa. Broji se svaki zapis sa tvog telefona.</li>
+            <li data-sr="Nivo 1 · Osnovni: mesto i prilog (slika, zvuk ili video)." data-en="Level 1 · Basic: place and an attachment (photo, sound or video).">Nivo 1 · Osnovni: mesto i prilog (slika, zvuk ili video).</li>
+            <li data-sr="Nivo 2 · Opisan: uz to tekst od najmanje 40 znakova ili izabran sloj doživljaja." data-en="Level 2 · Described: plus text of at least 40 characters or a chosen experience layer.">Nivo 2 · Opisan: uz to tekst od najmanje 40 znakova ili izabran sloj doživljaja.</li>
+            <li data-sr="Nivo 3 · Potpun: prilog, tekst od najmanje 40 znakova i sloj doživljaja." data-en="Level 3 · Complete: attachment, text of at least 40 characters and an experience layer.">Nivo 3 · Potpun: prilog, tekst od najmanje 40 znakova i sloj doživljaja.</li>
+            <li data-sr="Nivo možeš podići naknadno: u Dnevniku na svom zapisu dodirni „Uredi“ i dopuni tekst ili sloj." data-en="You can raise the level later: in the Journal tap “Edit” on your entry and add text or a layer.">Nivo možeš podići naknadno: u Dnevniku na svom zapisu dodirni „Uredi“ i dopuni tekst ili sloj.</li>
+          </ul>
+          <span data-sr="Svoj napredak (na primer 9/15) i rang svih timova vidiš na dugmetu ▤ pored „Novi zapis“." data-en="Your progress (for example 9/15) and the ranking of all teams are behind the ▤ button next to “New entry”.">Svoj napredak (na primer 9/15) i rang svih timova vidiš na dugmetu ▤ pored „Novi zapis“.</span>
         </div>
 
         <div style="padding-top:4px;font-size:12.5px;color:var(--ink-soft)">
@@ -276,7 +293,7 @@
           <input type="file" id="inp-cam-photo" accept="image/*" capture="environment" hidden>
           <input type="file" id="inp-cam-video" accept="video/*" capture="environment" hidden>
           <input type="file" id="inp-file-galerija" accept="image/*,video/*,audio/*" multiple hidden>
-          <span class="hint" data-sr="Slika iz galerije mora u sebi imati lokaciju; bez nje se ne prima (na licu mesta koristi „Slikaj“). Tekst, zvuk i video dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB)." data-en="A gallery photo must carry its location; without it, it is not accepted (on site use “Take photo”). Text, sound and video get the phone's position when saved. Video up to 60 s (90 MB).">Slika iz galerije mora u sebi imati lokaciju; bez nje se ne prima (na licu mesta koristi „Slikaj“). Tekst, zvuk i video dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB).</span>
+          <span class="hint" data-sr="Slika i video iz galerije moraju u sebi imati lokaciju; bez nje se ne primaju (na licu mesta koristi „Slikaj“ ili „Snimi video“). Tekst, zvuk i snimci iz aplikacije dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB)." data-en="A gallery photo or video must carry its location; without it, it is not accepted (on site use “Take photo” or “Record video”). Text, sound and in-app recordings get the phone's position when saved. Video up to 60 s (90 MB).">Slika i video iz galerije moraju u sebi imati lokaciju; bez nje se ne primaju (na licu mesta koristi „Slikaj“ ili „Snimi video“). Tekst, zvuk i snimci iz aplikacije dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB).</span>
         </div>
 
         <div class="attached-list" id="comp-attachments"></div>
@@ -284,6 +301,29 @@
       <div class="sheet-foot">
         <button type="button" class="btn-secondary" data-close-modal data-sr="Otkaži" data-en="Cancel">Otkaži</button>
         <button type="button" class="btn-primary" id="btn-save-entry" data-sr="Sačuvaj u žurnal" data-en="Save to journal">Sačuvaj u žurnal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL 7: NAPREDAK ČLANA I RANG TIMOVA (Zadatak 1) -->
+  <div class="sheet-backdrop" id="modal-rank" role="dialog" aria-modal="true" aria-labelledby="rank-title" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="rank-title" data-sr="Napredak i rang timova · Zadatak 1" data-en="Progress and team ranking · Task 1">Napredak i rang timova · Zadatak 1</h2>
+        <button type="button" class="close-btn" data-close-modal aria-label="Zatvori">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="rank-legend">
+          <span data-sr="Količina: koliko članova tima ima svojih 15 zapisa. Zapisi jednog člana preko 15 ne popunjavaju tuđi deo. Član se broji po telefonu sa kog šalje." data-en="Quantity: how many team members have their 15 entries. One member's entries above 15 do not fill another member's share. A member is counted by the phone they send from.">Količina: koliko članova tima ima svojih 15 zapisa. Zapisi jednog člana preko 15 ne popunjavaju tuđi deo. Član se broji po telefonu sa kog šalje.</span><br>
+          <span data-sr="Popunjenost: udeo zapisa po nivou; procenat je udeo nivoa 3." data-en="Completeness: share of entries by level; the percentage is the share of level 3.">Popunjenost: udeo zapisa po nivou; procenat je udeo nivoa 3.</span><br>
+          <span class="key"><i class="l1"></i><span data-sr="1 · Osnovni" data-en="1 · Basic">1 · Osnovni</span></span>
+          <span class="key"><i class="l2"></i><span data-sr="2 · Opisan" data-en="2 · Described">2 · Opisan</span></span>
+          <span class="key"><i class="l3"></i><span data-sr="3 · Potpun" data-en="3 · Complete">3 · Potpun</span></span>
+        </div>
+        <div id="rank-body" style="display:grid;gap:10px"></div>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn-primary" data-close-modal data-sr="Zatvori" data-en="Close">Zatvori</button>
       </div>
     </div>
   </div>
