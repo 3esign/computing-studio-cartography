@@ -140,6 +140,7 @@
       zaNivo3Uredi: fali => `Za nivo 3 još treba: ${fali}. Dopuni u Dnevniku dugmetom „Uredi“.`,
       nivo3Dostignut: 'Zapis je potpun (nivo 3).',
       rangDugme: 'Rang',
+      fajlNijeZvuk: ime => `Fajl „${ime}“ nije dodat jer nije zvučni zapis. Dugme „Zvučni fajl“ prima samo zvuk; sliku i video dodaj dugmetom „Iz galerije“.`,
       slikaBezLokacije: ime => `Slika „${ime}“ nije dodata jer u sebi nema lokaciju, pa je ne možemo postaviti na mapu. Na licu mesta slikaj dugmetom „Slikaj“. iPhone: u galeriji dodirni „Options“ (Opcije) i uključi „Location“ pre izbora slike. Android: galerija najčešće briše lokaciju, zato slikaj iz aplikacije.`,
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `GPS grub (±${Math.round(m)} m)`,
@@ -200,6 +201,7 @@
       zaNivo3Uredi: fali => `Level 3 still needs: ${fali}. Add it in the Journal with “Edit”.`,
       nivo3Dostignut: 'The entry is complete (level 3).',
       rangDugme: 'Ranking',
+      fajlNijeZvuk: ime => `File “${ime}” was not added because it is not a sound recording. “Sound file” accepts sound only; add photos and video with “From gallery”.`,
       slikaBezLokacije: ime => `Photo “${ime}” was not added because it carries no location, so it cannot be placed on the map. On site, use “Take photo”. iPhone: in the gallery tap “Options” and turn on “Location” before choosing. Android: the gallery usually strips location, so take the photo in the app.`,
       gpsOk: m => `GPS ±${Math.round(m)} m`,
       gpsGrub: m => `Coarse GPS (±${Math.round(m)} m)`,
@@ -3768,7 +3770,19 @@
         }
       }
     };
-    const jeZvukFajl = f => (f.type || '').startsWith('audio/') || /\.(mp3|m4a|ogg|opus|wav|aac)$/i.test(f.name || '');
+    // .qta je QuickTime zvuk koji noviji Voice Memos čuva umesto .m4a; .caf, .flac, .amr i .m4b daju drugi snimači.
+    const jeZvukFajl = f => (f.type || '').startsWith('audio/') || /\.(mp3|m4a|ogg|opus|wav|aac|qta|caf|flac|amr|m4b)$/i.test(f.name || '');
+    const jeVideoFajl = f => !jeZvukFajl(f) && ((f.type || '').startsWith('video/') || /\.(mp4|mov|m4v|webm|3gp|mkv|avi)$/i.test(f.name || ''));
+    // Fajl bez tipa i bez poznatog nastavka: odlučuje početak sadržaja (kontejneri u kojima telefoni čuvaju zvuk).
+    const pocetakLiciNaZvuk = b => {
+      if (!b || b.length < 12) return false;
+      const s = (od, n) => String.fromCharCode(...b.slice(od, od + n));
+      return ['ftyp', 'moov', 'mdat', 'wide', 'free'].includes(s(4, 4)) || ['RIFF', 'OggS', 'fLaC', 'caff'].includes(s(0, 4)) ||
+        s(0, 3) === 'ID3' || s(0, 5) === '#!AMR' || (b[0] === 0xFF && (b[1] & 0xE0) === 0xE0);
+    };
+    // Server vrstu priloga čita iz tipa i nastavka. Zvuk koji telefon prijavi bez tipa ili kao video/quicktime (.qta)
+    // šalje se kao audio/mp4, da ne završi u grani za video i bude odbijen.
+    const kaoZvuk = f => ((f.type || '').startsWith('audio/') ? f : new File([f], f.name || 'zvuk.m4a', { type: 'audio/mp4', lastModified: f.lastModified }));
     const dodajSnimak = (f, gpsSlike) => {
       if (f.size > 90 * 1024 * 1024) {
         toast('Fajl prelazi 90 MB. Snimi kraći video (do 60 sekundi).');
@@ -3795,6 +3809,29 @@
     document.getElementById('inp-cam-video').onchange = e => {
       for (const f of uzmiFajlove(e)) dodajSnimak(f);
     };
+    // Red o Voice Memos i „Choose Files“ važi samo za iPhone/iPad; na ostalim telefonima ostaje skriven.
+    (() => {
+      const red = document.getElementById('hint-zvuk-ios');
+      if (red && /iPhone|iPad|iPod/i.test(navigator.userAgent || '')) red.hidden = false;
+    })();
+    // Od 24.11.2026: zasebno polje bez filtera tipova, jer iPhone u polju sa accept zasivi snimak iz Voice Memos.
+    document.getElementById('inp-file-zvuk').onchange = async e => {
+      const errEl = document.getElementById('comp-error');
+      for (const f of uzmiFajlove(e)) {
+        let zvuk = jeZvukFajl(f);
+        if (!zvuk && !jeSlika(f) && !jeVideoFajl(f)) {
+          try { zvuk = pocetakLiciNaZvuk(new Uint8Array(await f.slice(0, 12).arrayBuffer())); } catch { zvuk = false; }
+        }
+        if (!zvuk) {
+          errEl.textContent = t('fajlNijeZvuk', f.name || 'fajl');
+          errEl.hidden = false;
+          if (errEl.scrollIntoView) errEl.scrollIntoView({ block: 'nearest' });
+          continue;
+        }
+        errEl.hidden = true;
+        dodajSnimak(kaoZvuk(f));
+      }
+    };
     document.getElementById('inp-file-galerija').onchange = async e => {
       for (const f of uzmiFajlove(e)) {
         if (jeSlika(f)) {
@@ -3813,7 +3850,7 @@
           await dodajSliku(f, gpsSlike);
           if (gpsSlike && !imaoMesto && gpsIzPrilogaKompozitora()) toast(t('mestoIzSlike'));
         } else if (jeZvukFajl(f)) {
-          dodajSnimak(f);
+          dodajSnimak(kaoZvuk(f));
         } else {
           // Od izdanja 2026-11-23.3: video iz galerije mora u sebi nositi lokaciju, kao slika; inače bi završio na mestu slanja.
           // Video snimljen dugmetom „Snimi video“ nastaje ovde i sada, pa važi GPS telefona.

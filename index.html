@@ -320,11 +320,19 @@
               <span aria-hidden="true">🖼️</span>
               <span data-sr="Iz galerije" data-en="From gallery">Iz galerije</span>
             </label>
+            <label class="media-btn media-btn-wide" for="inp-file-zvuk">
+              <span aria-hidden="true">🎵</span>
+              <span data-sr="Zvučni fajl" data-en="Sound file">Zvučni fajl</span>
+            </label>
           </div>
           <input type="file" id="inp-cam-photo" accept="image/*" capture="environment" hidden>
           <input type="file" id="inp-cam-video" accept="video/*" capture="environment" hidden>
           <input type="file" id="inp-file-galerija" accept="image/*,video/*,audio/*" multiple hidden>
+          <!-- Bez accept, namerno: iPhone zasivi snimak iz Voice Memos (.qta, .m4a bez tipa) čim polje filtrira tipove. Tip proverava app.js posle izbora. -->
+          <input type="file" id="inp-file-zvuk" hidden>
           <span class="hint" data-sr="Slika i video iz galerije moraju u sebi imati lokaciju; bez nje se ne primaju (na licu mesta koristi „Slikaj“ ili „Snimi video“). Tekst, zvuk i snimci iz aplikacije dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB)." data-en="A gallery photo or video must carry its location; without it, it is not accepted (on site use “Take photo” or “Record video”). Text, sound and in-app recordings get the phone's position when saved. Video up to 60 s (90 MB).">Slika i video iz galerije moraju u sebi imati lokaciju; bez nje se ne primaju (na licu mesta koristi „Slikaj“ ili „Snimi video“). Tekst, zvuk i snimci iz aplikacije dobijaju mesto telefona u trenutku čuvanja. Video do 60 s (90 MB).</span>
+          <span class="hint" id="hint-zvuk-fajl" data-sr="Snimljen zvuk dodaješ dugmetom „Zvučni fajl“ (do 25 MB). Zvuk nema svoju lokaciju, pa dobija mesto telefona." data-en="Add a recorded sound with “Sound file” (up to 25 MB). Sound has no location of its own, so it gets the phone's position.">Snimljen zvuk dodaješ dugmetom „Zvučni fajl“ (do 25 MB). Zvuk nema svoju lokaciju, pa dobija mesto telefona.</span>
+          <span class="hint" id="hint-zvuk-ios" hidden data-sr="iPhone: posle „Zvučni fajl“ izaberi „Choose File“ (Izaberi fajl). Snimak iz aplikacije Voice Memos prvo sačuvaj u Files: otvori snimak → Share → „Save to Files“." data-en="iPhone: after “Sound file” choose “Choose File”. Save a Voice Memos recording to Files first: open the recording → Share → “Save to Files”.">iPhone: posle „Zvučni fajl“ izaberi „Choose File“ (Izaberi fajl). Snimak iz aplikacije Voice Memos prvo sačuvaj u Files: otvori snimak → Share → „Save to Files“.</span>
         </div>
 
         <div class="attached-list" id="comp-attachments"></div>

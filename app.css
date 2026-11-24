@@ -975,6 +975,14 @@ button, input, textarea, select {
   gap: 7px;
 }
 
+/* Peto dugme („Zvučni fajl“) zauzima ceo red, da ne ostane samo u polovini mreže. */
+.media-btn.media-btn-wide {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  gap: 8px;
+  min-height: 44px;
+}
+
 .media-btn.media-btn-main {
   border-style: solid;
   border-color: var(--ink);
