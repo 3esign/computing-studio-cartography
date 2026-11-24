@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-23.7';
+  const VERZIJA_APP = '2026-11-24.1';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -119,7 +119,7 @@
       gpsTrazi: 'Tražim GPS lokaciju…',
       gpsMiruje: 'Lokacija se ne čita',
       mestoCeka: 'mesto: dodaj sliku sa lokacijom ili snimi iz aplikacije',
-      potrebanGpsOdbijen: 'Pregledač ne dozvoljava lokaciju, a zapis nema sliku ni video sa lokacijom. Dodaj sliku iz galerije koja nosi lokaciju, ili dozvoli lokaciju (uputstvo je pod trakom lokacije na dnu ekrana).',
+      potrebanGpsOdbijen: 'Pregledač ne dozvoljava lokaciju, a zapis nema sliku ni video sa lokacijom. Dodaj sliku iz galerije koja nosi lokaciju, ili dozvoli lokaciju: uputstvo je odmah ispod.',
       mestoIzSlike: 'Mesto zapisa je uzeto iz slike.',
       mestoIzSlikeKratko: 'mesto iz slike',
       mestoIzVidea: 'Mesto zapisa je uzeto iz videa.',
@@ -164,6 +164,8 @@
       sacuvanoUzivo: 'Zapis je upisan u Urbani žurnal i vidljiv na mapi!',
       sacuvanoOffline: 'Sačuvano u telefonu! Poslaće se automatski čim server bude dostupan.',
       saljeSeVeliki: 'Sačuvano u telefonu. Veliki prilog se šalje u pozadini; ostavi aplikaciju otvorenu dok ne stigne.',
+      nastaviKao: (ime, n) => `Nastavi kao ${ime} (${n} ${n % 10 === 1 && n % 100 !== 11 ? 'zapis' : 'zapisa'})`,
+      izborPovratka: (ime, tim) => `U timu ${tim} već postoji „${ime}“ sa zapisima. Ako si to ti, nastavi na svom mestu da ne zauzmeš drugo.`,
       kopirano: 'Link je kopiran! Otvori Safari ili Chrome i nalepi ga u adresnu traku.',
       snimam: s => `Zaustavi (${s}s)`,
       snimiZvuk: 'Snimi zvuk',
@@ -225,6 +227,8 @@
       sacuvanoUzivo: 'Entry saved to Urban Journal and live on the map!',
       sacuvanoOffline: 'Saved on your phone! Will sync automatically once connected.',
       saljeSeVeliki: 'Saved on your phone. The large attachment is uploading in the background; keep the app open until it arrives.',
+      nastaviKao: (ime, n) => `Continue as ${ime} (${n} ${n === 1 ? 'entry' : 'entries'})`,
+      izborPovratka: (ime, tim) => `Team ${tim} already has “${ime}” with entries. If that is you, continue in your seat so you do not take a second one.`,
       kopirano: 'Link copied! Open Safari or Chrome and paste it into the address bar.',
       snimam: s => `Stop (${s}s)`,
       snimiZvuk: 'Record sound',
@@ -1007,6 +1011,7 @@
 
     errBox.hidden = true;
     qrBox.hidden = true;
+    document.getElementById('login-return-box').hidden = true;
     inappBox.hidden = !jePrivremeniPregledac();
 
     if (STANJE.sesija && STANJE.sesija.nadimak && !inpNad.value) {
@@ -1049,9 +1054,30 @@
     }
   }
 
-  async function izvrsiPrijavu() {
+  // Server je našao mesto sa zapisima pod istim imenom na istom tipu telefona: pitaj umesto da se otvori drugo mesto.
+  function prikaziIzborPovratka(j) {
+    const box = document.getElementById('login-return-box');
+    const opcije = document.getElementById('login-return-options');
+    const mesta = Array.isArray(j.mesta) ? j.mesta : [];
+    // Ime se ispisuje onako kako je upisano na postojećem mestu, ne kako je sada otkucano.
+    document.getElementById('login-return-text').textContent = t('izborPovratka', (mesta[0] && mesta[0].nadimak) || j.nadimak || '', j.tim || '');
+    opcije.textContent = '';
+    for (const m of mesta) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn-primary';
+      b.textContent = t('nastaviKao', m.nadimak || j.nadimak || '', Number(m.zapisa) || 0);
+      b.onclick = () => izvrsiPrijavu({ povratak_uredjaj_id: m.uredjaj_id });
+      opcije.appendChild(b);
+    }
+    box.hidden = false;
+  }
+
+  async function izvrsiPrijavu(izbor) {
     const btn = document.getElementById('btn-submit-login');
     const errBox = document.getElementById('login-error-box');
+    const izborBox = document.getElementById('login-return-box');
+    izborBox.hidden = true;
     const tim = document.getElementById('inp-tim').value.trim().toUpperCase();
     const kod = document.getElementById('inp-kod').value.trim().toUpperCase();
     const nadimak = document.getElementById('inp-nadimak').value.trim();
@@ -1073,10 +1099,16 @@
           tim,
           kod,
           nadimak,
-          postojeca_tajna: STANJE.sesija && STANJE.sesija.tim === tim ? STANJE.sesija.tajna : ''
+          postojeca_tajna: STANJE.sesija && STANJE.sesija.tim === tim ? STANJE.sesija.tajna : '',
+          podrzava_izbor: true,
+          ...(izbor || {})
         })
       });
       const j = await r.json();
+      if (r.status === 409 && j.kod_greske === 'IZBOR_POVRATKA') {
+        prikaziIzborPovratka(j);
+        return;
+      }
       if (!r.ok || !j.ok) {
         errBox.textContent = j.poruka || 'Prijava nije uspela.';
         errBox.hidden = false;
@@ -3616,7 +3648,41 @@
     document.getElementById('btn-open-composer').onclick = otvoriKompozitor;
     const btnUpd = document.getElementById('btn-update-app');
     if (btnUpd) btnUpd.onclick = () => osveziAplikaciju(STANJE.novaVerzijaDostupna);
-    document.getElementById('btn-submit-login').onclick = izvrsiPrijavu;
+    document.getElementById('btn-submit-login').onclick = () => izvrsiPrijavu();
+    document.getElementById('btn-login-new-member').onclick = () => izvrsiPrijavu({ novi_clan: true });
+
+    // Dugme „Kako da dozvolim lokaciju“ stoji uz grešku odbijene lokacije i otvara korake unutar zapisa.
+    // Panel uputstva bi zatvorio zapis i obrisao dodate priloge, pa se koraci ovde prepisuju iz njega.
+    (() => {
+      const err = document.getElementById('comp-error');
+      const kutija = document.getElementById('comp-gps-help');
+      const dugme = document.getElementById('btn-comp-gps-help');
+      const koraci = document.getElementById('comp-gps-steps');
+      if (!err || !kutija || !dugme || !koraci) return;
+      const uskladi = () => {
+        const treba = !err.hidden && err.textContent === t('potrebanGpsOdbijen');
+        if (kutija.hidden === !treba) return;
+        kutija.hidden = !treba;
+        if (!treba) {
+          koraci.hidden = true;
+          dugme.setAttribute('aria-expanded', 'false');
+        }
+      };
+      new MutationObserver(uskladi).observe(err, { attributes: true, attributeFilter: ['hidden'], childList: true, characterData: true, subtree: true });
+      dugme.onclick = () => {
+        if (!koraci.childElementCount) {
+          const ua = navigator.userAgent || '';
+          const moja = /iPhone|iPad|iPod/i.test(ua) ? 'ios' : /Android/i.test(ua) ? 'android' : '';
+          document.querySelectorAll('#modal-gps-help [data-gps-platforma]').forEach(l => {
+            if (moja && l.getAttribute('data-gps-platforma') !== moja) return;
+            koraci.appendChild(l.parentElement.cloneNode(true));
+          });
+        }
+        koraci.hidden = !koraci.hidden;
+        dugme.setAttribute('aria-expanded', String(!koraci.hidden));
+        if (!koraci.hidden) koraci.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      };
+    })();
     document.getElementById('btn-scan-qr-cam').onclick = pokreniQrKameru;
     document.getElementById('btn-stop-qr-cam').onclick = zaustaviQrKameru;
     document.getElementById('inp-qr-image').onchange = async e => {

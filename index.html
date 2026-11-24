@@ -147,6 +147,12 @@
 
         <div class="alert-box ok" id="qr-detected-box" hidden></div>
         <div class="alert-box err" id="login-error-box" hidden></div>
+        <div class="alert-box info login-return" id="login-return-box" hidden>
+          <p id="login-return-text"></p>
+          <div class="login-return-actions" id="login-return-options"></div>
+          <button type="button" class="btn-secondary" id="btn-login-new-member" data-sr="Nisam ja · uđi kao novi član" data-en="Not me · join as a new member">Nisam ja · uđi kao novi član</button>
+          <span class="hint" data-sr="Nastavak čuva tvoje zapise na jednom mestu. Pregledač u kom si ranije bio prijavljen na to mesto traži novu prijavu." data-en="Continuing keeps your entries in one seat. The browser previously signed in to that seat will ask to sign in again.">Nastavak čuva tvoje zapise na jednom mestu. Pregledač u kom si ranije bio prijavljen na to mesto traži novu prijavu.</span>
+        </div>
 
         <div id="manual-code-fields">
           <div class="field" style="margin-bottom:10px">
@@ -274,6 +280,10 @@
         <div class="meta-strip" id="comp-meta-strip"></div>
         <div class="composer-prompt" data-sr="Vežba 1: Kako beležiš doživljaj ovog prostora, okruženja ili kretanja kroz izabrani komšiluk / blok / naselje?" data-en="Exercise 1: How do you capture the experience of this space, surroundings, or movement through your chosen neighborhood / block?">Vežba 1: Kako beležiš doživljaj ovog prostora, okruženja ili kretanja kroz izabrani komšiluk / blok / naselje?</div>
         <div class="alert-box err" id="comp-error" hidden></div>
+        <div class="gps-inline-help" id="comp-gps-help" hidden>
+          <button type="button" class="btn-secondary" id="btn-comp-gps-help" aria-expanded="false" aria-controls="comp-gps-steps" data-sr="Kako da dozvolim lokaciju" data-en="How to allow location">Kako da dozvolim lokaciju</button>
+          <div class="alert-box warn" id="comp-gps-steps" hidden></div>
+        </div>
 
         <div class="field">
           <label data-sr="Sloj doživljaja (opciono, možeš izabrati više)" data-en="Experience layer (optional, select any)">Sloj doživljaja (opciono, možeš izabrati više)</label>
@@ -420,18 +430,20 @@
           Pregledač trenutno nema dozvolu za čitanje lokacije telefona. Dozvola nije obavezna: zapis dobija mesto i iz slike ili videa iz galerije koji u sebi nose lokaciju. Tekst, zvuk i snimci iz aplikacije traže mesto telefona.
         </div>
         <div class="field">
-          <label data-sr="Na Android telefonu (Chrome):" data-en="On Android (Chrome):">Na Android telefonu (Chrome):</label>
+          <label data-gps-platforma="android" data-sr="Na Android telefonu (Chrome):" data-en="On Android (Chrome):">Na Android telefonu (Chrome):</label>
           <ol class="steps-list">
             <li data-sr="Uključi Lokaciju u brzim podešavanjima telefona (prevuci ekran odozgo)." data-en="Turn on Location in your phone's Quick Settings.">Uključi Lokaciju u brzim podešavanjima telefona (prevuci ekran odozgo).</li>
             <li data-sr="U Chrome-u dodirni ikonicu levo od adrese sajta → Dozvole (Permissions) → Lokacija → Dozvoli." data-en="Tap the icon left of the address bar → Permissions → Location → Allow.">U Chrome-u dodirni ikonicu levo od adrese sajta → Dozvole (Permissions) → Lokacija → Dozvoli.</li>
           </ol>
         </div>
         <div class="field">
-          <label data-sr="Na iPhone-u (Safari):" data-en="On iPhone (Safari):">Na iPhone-u (Safari):</label>
+          <label data-gps-platforma="ios" data-sr="Na iPhone-u (Safari): tri odvojena prekidača, moraju biti uključena sva tri" data-en="On iPhone (Safari): three separate switches, all three must be on">Na iPhone-u (Safari): tri odvojena prekidača, moraju biti uključena sva tri</label>
           <ol class="steps-list">
             <li data-sr="Otvori Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App (uključi Precise Location)." data-en="Open Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App (enable Precise Location).">Otvori Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using the App (uključi Precise Location).</li>
-            <li data-sr="U Safariju dodirni aA ili ikonicu pored adrese → Website Settings → Location → Allow." data-en="In Safari tap aA or the address bar icon → Website Settings → Location → Allow.">U Safariju dodirni aA ili ikonicu pored adrese → Website Settings → Location → Allow.</li>
+            <li data-sr="Otvori Settings → Apps → Safari → Location → Ask ili Allow (na starijem iOS-u: Settings → Safari → Location). Ako stoji Deny, Safari odbija sve sajtove." data-en="Open Settings → Apps → Safari → Location → Ask or Allow (older iOS: Settings → Safari → Location). If it says Deny, Safari blocks every site.">Otvori Settings → Apps → Safari → Location → Ask ili Allow (na starijem iOS-u: Settings → Safari → Location). Ako stoji Deny, Safari odbija sve sajtove.</li>
+            <li data-sr="U Safariju, na ovoj stranici, dodirni aA ili ikonicu pored adrese → Website Settings → Location → Allow. Ako si ranije dodirnuo „Don't Allow“, ovde ostaje Deny i nadjačava prva dva." data-en="In Safari, on this page, tap aA or the address bar icon → Website Settings → Location → Allow. If you once tapped “Don't Allow”, this stays on Deny and overrides the first two.">U Safariju, na ovoj stranici, dodirni aA ili ikonicu pored adrese → Website Settings → Location → Allow. Ako si ranije dodirnuo „Don't Allow“, ovde ostaje Deny i nadjačava prva dva.</li>
           </ol>
+          <span class="hint" data-sr="Posle izmene osveži stranicu, pa dodirni traku lokacije na dnu ekrana." data-en="After changing them, reload the page and tap the location bar at the bottom of the screen.">Posle izmene osveži stranicu, pa dodirni traku lokacije na dnu ekrana.</span>
         </div>
       </div>
       <div class="sheet-foot">

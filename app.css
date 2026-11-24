@@ -1081,6 +1081,15 @@ button, input, textarea, select {
   line-height: 1.45;
   border: 1px solid var(--line);
 }
+.gps-inline-help { display: grid; gap: 8px; margin-top: 8px; }
+.gps-inline-help .btn-secondary { width: 100%; }
+.gps-inline-help .field { margin-bottom: 8px; }
+.gps-inline-help .field:last-child { margin-bottom: 0; }
+.login-return { margin-top: 8px; }
+.login-return p { margin: 0 0 9px; }
+.login-return-actions { display: grid; gap: 8px; margin-bottom: 8px; }
+.login-return .btn-primary, .login-return .btn-secondary { width: 100%; }
+.login-return .hint { display: block; margin-top: 8px; font-size: 12px; opacity: .85; }
 .alert-box.warn { background: var(--warn-bg); border-color: #f3c68f; color: #7a3903; }
 .alert-box.err { background: var(--err-bg); border-color: #f4b4ae; color: var(--err); }
 .alert-box.ok { background: var(--ok-bg); border-color: #a6dfc5; color: var(--ok); }
