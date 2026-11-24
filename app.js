@@ -50,6 +50,7 @@
     mapa: null,
     mapaSpremna: false,
     mapa3D: true,
+    cekaFokusMape: null,
     korisnikMarker: null,
     novaVerzijaDostupna: '',
     obaveznoOsvezavanje: false,
@@ -2967,9 +2968,14 @@
         btn.onclick = () => {
           const z = zapisi[Number(btn.getAttribute('data-goto-idx'))];
           if (!z) return;
-          postaviPogled('mapa');
+          STANJE.trebaUokviriti = false;
           if (STANJE.mapa && STANJE.mapaSpremna) {
+            STANJE.cekaFokusMape = null;
+            postaviPogled('mapa');
             STANJE.mapa.flyTo({ center: [z.lon, z.lat], zoom: 18, duration: 750 });
+          } else {
+            STANJE.cekaFokusMape = { lon: Number(z.lon), lat: Number(z.lat), zoom: 18 };
+            postaviPogled('mapa');
           }
         };
       });
@@ -3035,7 +3041,10 @@
   }
 
   // --- 3D Mapa Beograda (MapLibre GL + OpenFreeMap + klasterisanje + metrički krugovi iskustva) ---
-  function napraviPoligonKruga(lon, lat, radijusM, tacaka = 32) {
+  const kesPoligonaKrugova = new Map();
+  let poslednjiPotpisMape = '';
+
+  function napraviPoligonKruga(lon, lat, radijusM, tacaka = 16) {
     const koordinate = [];
     const dLat = radijusM / 111132;
     const dLon = radijusM / (111320 * Math.cos((lat * Math.PI) / 180));
@@ -3044,6 +3053,26 @@
       koordinate.push([lon + dLon * Math.cos(ugao), lat + dLat * Math.sin(ugao)]);
     }
     return [koordinate];
+  }
+
+  function poligonKrugaIzKesa(lon, lat, radijusM) {
+    const kljuc = `${lon.toFixed(6)}:${lat.toFixed(6)}:${radijusM}`;
+    let pol = kesPoligonaKrugova.get(kljuc);
+    if (!pol) {
+      if (kesPoligonaKrugova.size > 5000) kesPoligonaKrugova.clear();
+      pol = napraviPoligonKruga(lon, lat, radijusM);
+      kesPoligonaKrugova.set(kljuc, pol);
+    }
+    return pol;
+  }
+
+  function napraviPotpisMape(zapisi, mojTim) {
+    const delovi = [`${mojTim || ''}|${zapisi.length}`];
+    for (let i = 0; i < zapisi.length; i++) {
+      const z = zapisi[i];
+      delovi.push(`${z.id}|${z.uTelefonu ? 1 : 0}|${z.tim}|${z.autor}|${z.lat}|${z.lon}|${z.radijus_m || 12}`);
+    }
+    return delovi.join('~');
   }
 
   function otvoriDetaljZapisa(ulaz, aktivniIndeks = 0) {
@@ -3122,6 +3151,12 @@
   function azurirajSlojeveMape(zapisi) {
     if (!STANJE.mapa || !STANJE.mapaSpremna) return;
     const mojTim = STANJE.sesija ? STANJE.sesija.tim : '';
+    const potpis = napraviPotpisMape(zapisi, mojTim);
+    if (potpis === poslednjiPotpisMape) {
+      STANJE._poslednjiZapisiMape = zapisi;
+      return;
+    }
+    poslednjiPotpisMape = potpis;
 
     // Grupiši zapise koji padaju u istu mikro-ćeliju (~3 m) kako se pinovi na uličnom zumu ne bi preklapali
     const grupeBliskih = new Map();
@@ -3164,7 +3199,7 @@
       },
       geometry: {
         type: 'Polygon',
-        coordinates: napraviPoligonKruga(Number(z.lon), Number(z.lat), Number(z.radijus_m) || 12)
+        coordinates: poligonKrugaIzKesa(Number(z.lon), Number(z.lat), Number(z.radijus_m) || 12)
       }
     }));
 
@@ -3269,6 +3304,7 @@
       id: 'uz-krugovi-ispuna',
       type: 'fill',
       source: 'uz-krugovi',
+      minzoom: 13.5,
       paint: {
         'fill-color': [
           'case',
@@ -3276,7 +3312,7 @@
           ['==', ['get', 'moj'], 1], '#b8861b',
           '#176646'
         ],
-        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.05, 14.5, 0.13, 17, 0.22]
+        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13.5, 0.06, 15, 0.14, 17, 0.22]
       }
     });
 
@@ -3284,6 +3320,7 @@
       id: 'uz-krugovi-ivica',
       type: 'line',
       source: 'uz-krugovi',
+      minzoom: 13.5,
       paint: {
         'line-color': [
           'case',
@@ -3291,8 +3328,8 @@
           ['==', ['get', 'moj'], 1], '#8a6d1f',
           '#115037'
         ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16.5, 1.4],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0.22, 14.5, 0.45, 17, 0.72]
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13.5, 0.9, 16.5, 1.4],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 13.5, 0.25, 15, 0.48, 17, 0.72]
       }
     });
 
@@ -3435,11 +3472,21 @@
       }
     }
 
+    poslednjiPotpisMape = '';
     azurirajPlavuTackuNaMapi();
     azurirajSlojeveMape(sviVidljiviZapisi());
+    if (STANJE.cekaFokusMape) {
+      const f = STANJE.cekaFokusMape;
+      STANJE.cekaFokusMape = null;
+      STANJE.trebaUokviriti = false;
+      try { mapa.flyTo({ center: [f.lon, f.lat], zoom: f.zoom || 18, duration: 750 }); } catch {}
+    } else if (STANJE.pogled === 'mapa' && STANJE.trebaUokviriti) {
+      uokviriOpsegNaMapi();
+    }
   }
 
   function inicijalizujMapu() {
+    if (STANJE.mapa) return;
     if (!window.maplibregl) {
       document.getElementById('map-fallback').hidden = false;
       return;
@@ -3516,9 +3563,13 @@
     document.getElementById('view-map-btn').setAttribute('aria-selected', String(jeMapa));
     document.getElementById('view-list-btn').classList.toggle('active', !jeMapa);
     document.getElementById('view-list-btn').setAttribute('aria-selected', String(!jeMapa));
-    if (jeMapa && STANJE.mapa) {
-      setTimeout(() => STANJE.mapa.resize(), 30);
-      uokviriOpsegNaMapi();
+    if (jeMapa) {
+      if (!STANJE.mapa) {
+        inicijalizujMapu();
+      } else {
+        setTimeout(() => STANJE.mapa.resize(), 30);
+        uokviriOpsegNaMapi();
+      }
     } else if (!jeMapa && STANJE.dnevnikPrljav) {
       crtajPodatke(true);
     }
@@ -3962,13 +4013,20 @@
     primeniFilterIzAdrese();
     if (STANJE.pogled === 'lista') postaviPogled('lista');
     primeniJezik();
-    inicijalizujMapu();
+    // Na direktnom linku Dnevnika (?dnevnik=...) mapa se ne pokreće dok student ne pređe na 3D Mapu.
+    if (STANJE.pogled === 'mapa') inicijalizujMapu();
 
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => { STANJE.swRegistracija = reg; }).catch(() => {});
     }
 
-    STANJE.lokalniRed = await idbSviIzReda();
+    // Paralelno učitaj lokalni red, poslednje keširano stanje iz IndexedDB i adresu servera (endpoint.json)
+    const apiBazaPromis = razresiApiBazu(false);
+    const [lokalniRed, kesStanja] = await Promise.all([
+      idbSviIzReda(),
+      idbProcitajKes('poslednje_stanje')
+    ]);
+    STANJE.lokalniRed = lokalniRed;
     // Ako je zapis ranije odbijen zato što je stara kartica bila iz keša, nova verzija čisti tu blokadu da se zapis pošalje sam.
     for (const st of STANJE.lokalniRed) {
       if (st.stara_verzija || (st.status_greske === 422 && /zastarela|Stara verzija/i.test(st.trajna_greska || ''))) {
@@ -3978,24 +4036,37 @@
         await idbUpisiURed(st);
       }
     }
+    if (kesStanja && STANJE.serverZapisi.length === 0) {
+      STANJE.aktivnaNedelja = kesStanja.aktivnaNedelja || 1;
+      STANJE.serverZapisi = Array.isArray(kesStanja.zapisi) ? kesStanja.zapisi : [];
+      STANJE.serverStatistika = kesStanja.statistika || STANJE.serverStatistika;
+      crtajPodatke(false);
+    }
     osveziStatusTraku();
 
-    await razresiApiBazu(false);
+    await apiBazaPromis;
+
+    // Pokreni preuzimanje živog stanja odmah, paralelno sa proverom prijave (/api/ja)
+    const stanjePromis = ucitajStanjeSaServera(false);
 
     // Proveri postojeću prijavu uređaja ako postoji
+    let sesijaPromenjena = false;
     if (STANJE.sesija && STANJE.sesija.tajna) {
       // Ako student skenira QR DRUGOG tima, ponudi prijavu u taj novi tim
       if (STANJE.pendingQr && STANJE.pendingQr.tim !== STANJE.sesija.tim) {
         await pripremiPrijavuPanel();
       } else {
         try {
+          const stariUredjajId = Number(STANJE.sesija.uredjaj_id || 0);
           const r = await apiPoziv('/api/ja', { method: 'GET' });
           const j = await r.json();
           if (r.ok && j.ok) {
             sessionStorage.removeItem(SS_PENDING_QR);
             STANJE.pendingQr = null;
+            const noviUredjajId = j.uredjaj_id || STANJE.sesija.uredjaj_id || 0;
+            if (Number(noviUredjajId) !== stariUredjajId) sesijaPromenjena = true;
             sacuvajSesiju(Object.assign({}, STANJE.sesija, {
-              uredjaj_id: j.uredjaj_id || STANJE.sesija.uredjaj_id || 0,
+              uredjaj_id: noviUredjajId,
               nadimak: j.nadimak || STANJE.sesija.nadimak || '',
               oznaka: j.oznaka || STANJE.sesija.oznaka || '',
               zauzeto: j.zauzeto,
@@ -4005,6 +4076,7 @@
               toast(`${j.tim} · ${j.nadimak || j.oznaka} (isto mesto preneto)`);
             }
           } else if (r.status === 401) {
+            sesijaPromenjena = true;
             sacuvajSesiju(null);
             if (STANJE.pendingQr) await pripremiPrijavuPanel();
             else toast(j.poruka || 'Potrebna je ponovna QR prijava.');
@@ -4026,7 +4098,8 @@
       try { localStorage.setItem(LS_PRIVATNOST, '1'); } catch {}
     }
 
-    await ucitajStanjeSaServera(false);
+    await stanjePromis;
+    if (sesijaPromenjena) crtajPodatke(false);
     if (STANJE.lokalniRed.length > 0) {
       sinhronizujRed();
     }
