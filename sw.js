@@ -1,7 +1,7 @@
 /* Urbani žurnal · Network-First Service Worker za offline otvaranje ljuske aplikacije na terenu */
 'use strict';
 
-const KES_NAZIV = 'uz-ljuska-v3';
+const KES_NAZIV = 'uz-ljuska-v4';
 const STATICKI_FAJLOVI = [
   './',
   './index.html',
@@ -16,7 +16,14 @@ const STATICKI_FAJLOVI = [
 self.addEventListener('install', event => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(KES_NAZIV).then(cache => cache.addAll(STATICKI_FAJLOVI)).catch(() => {})
+    caches.open(KES_NAZIV).then(async cache => {
+      await Promise.allSettled(
+        STATICKI_FAJLOVI.map(async u => {
+          const odg = await fetch(new Request(u, { cache: 'reload' }));
+          if (odg && odg.ok) await cache.put(u, odg);
+        })
+      );
+    }).catch(() => {})
   );
 });
 
@@ -50,7 +57,7 @@ self.addEventListener('fetch', event => {
   // tek ako je student u podzemnom prolazu/bloku bez signala, posluži poslednju keširanu ljusku aplikacije.
   event.respondWith((async () => {
     try {
-      const mrezniOdg = await fetch(req, { cache: 'no-cache' });
+      const mrezniOdg = await fetch(req, { cache: req.cache === 'reload' ? 'reload' : 'no-cache' });
       if (mrezniOdg && mrezniOdg.ok) {
         const kopija = mrezniOdg.clone();
         caches.open(KES_NAZIV).then(c => c.put(req, kopija)).catch(() => {});

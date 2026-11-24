@@ -3,7 +3,7 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-24.1';
+  const VERZIJA_APP = '2026-11-24.2';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -329,8 +329,9 @@
   }
 
   async function osveziAplikaciju(ciljnaVerzija) {
+    const cilj = String(ciljnaVerzija || STANJE.novaVerzijaDostupna || '1');
     try {
-      sessionStorage.setItem(SS_AUTO_RELOAD_V, String(ciljnaVerzija || STANJE.novaVerzijaDostupna || '1'));
+      sessionStorage.setItem(SS_AUTO_RELOAD_V, cilj);
     } catch {}
     try {
       if (STANJE.swRegistracija && typeof STANJE.swRegistracija.update === 'function') {
@@ -343,12 +344,61 @@
         await Promise.all(kljucevi.filter(k => k.startsWith('uz-ljuska')).map(k => caches.delete(k)));
       }
     } catch {}
+    // Prisili HTTP keš pregledača (naročito iOS Safari / GitHub Pages max-age=600) da povuče sveže fajlove pre reload-a.
+    try {
+      await Promise.allSettled([
+        fetch('./', { cache: 'reload' }),
+        fetch('./index.html', { cache: 'reload' }),
+        fetch('./app.js', { cache: 'reload' }),
+        fetch('./app.css', { cache: 'reload' })
+      ]);
+    } catch {}
     location.reload();
   }
 
   function kompozitorOtvoren() {
     const m = document.getElementById('modal-composer');
     return Boolean(m && !m.hidden);
+  }
+
+  function imaOtvorenPanel() {
+    for (const pid of SVI_PANELI) {
+      const el = document.getElementById(pid);
+      if (el && !el.hidden) return true;
+    }
+    return false;
+  }
+
+  function trebaAutomatskiOsveziti(u) {
+    if (!u || !u.cilj) return false;
+    if (u.vecProbao && u.vecProbao === u.cilj) return false;
+    if (u.kompozitorOtvoren || u.sinhronizacijaUToku || u.snimanjeAktivno) return false;
+    if (u.obavezno) return true;
+    if (u.imaNova) return !u.imaOtvorenPanel && u.brojURedu === 0;
+    return false;
+  }
+
+  function pokusajAutomatskoOsvezavanje() {
+    const cilj = STANJE.novaVerzijaDostupna || '';
+    if (!cilj) return false;
+    let vecProbao = '';
+    try { vecProbao = sessionStorage.getItem(SS_AUTO_RELOAD_V) || ''; } catch {}
+    const ok = trebaAutomatskiOsveziti({
+      cilj,
+      vecProbao,
+      obavezno: Boolean(STANJE.obaveznoOsvezavanje),
+      imaNova: Boolean(STANJE.novaVerzijaDostupna),
+      kompozitorOtvoren: kompozitorOtvoren(),
+      imaOtvorenPanel: imaOtvorenPanel(),
+      sinhronizacijaUToku: Boolean(STANJE.sinhronizacijaUToku),
+      snimanjeAktivno: Boolean(STANJE.snimacZvuka),
+      brojURedu: Array.isArray(STANJE.lokalniRed) ? STANJE.lokalniRed.length : 0
+    });
+    if (ok) {
+      osveziAplikaciju(cilj);
+      return true;
+    }
+    return false;
   }
 
   function proveriVerzijuSaServera(podaci) {
@@ -360,17 +410,7 @@
     if (mora) STANJE.obaveznoOsvezavanje = true;
     if (imaNova || mora) STANJE.novaVerzijaDostupna = aktV || minV || STANJE.novaVerzijaDostupna;
     osveziBanerVerzije();
-
-    // Ako server zahteva noviju verziju, a student trenutno ne piše zapis niti traje slanje,
-    // jednokratno automatski osveži karticu (sa zaštitom od petlje u sessionStorage).
-    if (mora && !kompozitorOtvoren() && !STANJE.sinhronizacijaUToku) {
-      const cilj = aktV || minV;
-      let vecProbao = '';
-      try { vecProbao = sessionStorage.getItem(SS_AUTO_RELOAD_V) || ''; } catch {}
-      if (vecProbao !== cilj) {
-        osveziAplikaciju(cilj);
-      }
-    }
+    if (mora || imaNova) pokusajAutomatskoOsvezavanje();
   }
 
   function toast(poruka) {
@@ -2756,6 +2796,11 @@
     });
   }
 
+  function urlSliciceMedija(punUrl) {
+    if (!punUrl || punUrl.startsWith('blob:') || punUrl.startsWith('data:')) return punUrl;
+    return punUrl + (punUrl.includes('?') ? '&' : '?') + 'slicica=1';
+  }
+
   function htmlPriloziZapisa(prilozi, uDetalju = false) {
     if (!prilozi || !prilozi.length) return '';
     const slike = [];
@@ -2771,7 +2816,8 @@
       }
       if (!src) continue;
       if (p.vrsta === 'foto') {
-        slike.push(`<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" loading="lazy" decoding="async" alt="Fotografija sa terena"></a>`);
+        const imgSrc = (!uDetalju && !p.lokalniBlob) ? urlSliciceMedija(src) : src;
+        slike.push(`<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(imgSrc)}" loading="lazy" decoding="async" alt="Fotografija sa terena"></a>`);
       } else if (p.vrsta === 'zvuk') {
         av.push(`<audio controls preload="${preloadMod}" src="${esc(src)}"></audio>`);
       } else if (p.vrsta === 'video') {
@@ -3894,6 +3940,7 @@
         if (STANJE.swRegistracija && typeof STANJE.swRegistracija.update === 'function') {
           STANJE.swRegistracija.update().catch(() => {});
         }
+        if (pokusajAutomatskoOsvezavanje()) return;
         sinhronizujRed();
         ucitajStanjeSaServera();
       }
@@ -3918,7 +3965,7 @@
     inicijalizujMapu();
 
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-      navigator.serviceWorker.register('./sw.js').then(reg => { STANJE.swRegistracija = reg; }).catch(() => {});
+      navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => { STANJE.swRegistracija = reg; }).catch(() => {});
     }
 
     STANJE.lokalniRed = await idbSviIzReda();
