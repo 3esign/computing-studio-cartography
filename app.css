@@ -1360,3 +1360,52 @@ button, input, textarea, select {
   display: flex; align-items: center; gap: 8px; font: inherit; color: var(--ink); cursor: pointer; text-align: left;
 }
 .rank-member-name { flex: 0 1 38%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+
+/* Dnevnik u mreži: pločice umesto jedne kolone; dodir na pločicu otvara ceo zapis */
+.layout-field { flex: 0 0 auto; }
+.layout-switch { min-height: 40px; align-items: stretch; }
+.layout-switch .seg-btn { min-height: 34px; padding: 4px 12px; font-size: 13px; }
+.list-wrap.mreza .list-inner { max-width: 1480px; }
+.list-wrap.mreza #journal-feed {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+@media (min-width: 700px) {
+  .list-wrap.mreza #journal-feed { grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 12px; }
+}
+.list-wrap.mreza #journal-feed > .load-more-btn,
+.list-wrap.mreza #journal-feed > .entry-card:not([data-card-idx]) { grid-column: 1 / -1; }
+.list-wrap.mreza .entry-card[data-card-idx] { padding: 10px; gap: 6px; min-width: 0; overflow: hidden; cursor: pointer; }
+.list-wrap.mreza .entry-card[data-card-idx]:hover { border-color: var(--accent); }
+.list-wrap.mreza .entry-card .entry-media-grid {
+  order: -1; position: relative; grid-template-columns: 1fr; gap: 0; margin: -10px -10px 2px;
+}
+.list-wrap.mreza .entry-card .entry-media-grid a:nth-child(n+2) { display: none; }
+.list-wrap.mreza .entry-card .entry-media-grid a { display: block; }
+.list-wrap.mreza .entry-card .entry-media-grid img {
+  display: block; height: auto; aspect-ratio: 4 / 3; border: 0; border-radius: 0; border-bottom: 1px solid var(--line);
+}
+.list-wrap.mreza .entry-card .entry-media-grid[data-vise]::after {
+  content: '+' attr(data-vise); position: absolute; right: 8px; bottom: 8px;
+  background: rgba(20, 20, 20, 0.66); color: #fff; font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px; pointer-events: none;
+}
+.list-wrap.mreza .entry-card .entry-media-full > * { display: none; }
+.list-wrap.mreza .entry-card .entry-media-full::before {
+  content: attr(data-oznaka); display: inline-block; font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+  color: var(--accent-dark); background: var(--accent-soft); border-radius: 999px; padding: 2px 9px;
+}
+.list-wrap.mreza .entry-card .entry-text {
+  font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden;
+}
+.list-wrap.mreza .entry-card .tag-row { flex-wrap: nowrap; overflow: hidden; }
+.list-wrap.mreza .entry-card .tag-pill { white-space: nowrap; }
+.list-wrap.mreza .entry-card .entry-head { font-size: 11.5px; }
+.list-wrap.mreza .entry-card .entry-foot { font-size: 11px; margin-top: auto; }
+.list-wrap.mreza .entry-card .entry-foot-meta > span:first-child { display: none; }
+/* Pločica u kojoj je otvoreno „Uredi“ zauzima ceo red, da polje za izmenu ima mesta */
+.list-wrap.mreza .entry-card:has(.inline-edit-holder:not([hidden])) { grid-column: 1 / -1; cursor: default; }
+.list-wrap.mreza .entry-card:has(.inline-edit-holder:not([hidden])) .entry-text { display: block; -webkit-line-clamp: unset; line-clamp: unset; }
+.list-wrap.mreza .entry-card .lvl-badge::before { content: none; }

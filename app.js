@@ -13,6 +13,7 @@
   const LS_API = 'uz_poslednji_api_v1';
   const LS_PRVI_PUT = 'uz_upoznat_v1';
   const LS_PRIVATNOST = 'uz_privatnost_v1';
+  const LS_RASPORED = 'uz_dnevnik_raspored_v1';
   const SS_PENDING_QR = 'uz_pending_qr_v1';
   const RAW_ENDPOINT_FALLBACK = 'https://raw.githubusercontent.com/3esign/computing-studio-cartography/main/endpoint.json';
   const GPS_SVEZ_MS = 3 * 60 * 1000;      // 3 min posle buđenja ekrana
@@ -40,6 +41,7 @@
     ucitavanjeStanjaUToku: false,
     dnevnikPrikazano: 30,
     dnevnikPrljav: false,
+    raspored: 'lista',      // 'lista' ili 'mreza' — raspored kartica u Dnevniku
     lokalniRed: [],         // zapisi u IndexedDB koji čekaju slanje
     sinhronizacijaUToku: false,
     kompozitorPrilozi: [],  // [{ id, vrsta, ime, mime, blob, previewUrl, sirina, visina, trajanje }]
@@ -2802,11 +2804,42 @@
     return punUrl + (punUrl.includes('?') ? '&' : '?') + 'slicica=1';
   }
 
+  // Raspored Dnevnika: 'lista' (jedna kolona, sve akcije) ili 'mreza' (pločice; dodir otvara ceo zapis).
+  // Izbor se pamti na uređaju; bez izbora široki ekran kreće u mreži, a telefon u listi.
+  function pocetniRasporedDnevnika(sacuvano, sirinaPx) {
+    if (sacuvano === 'mreza' || sacuvano === 'lista') return sacuvano;
+    return Number(sirinaPx) >= 900 ? 'mreza' : 'lista';
+  }
+
+  function primeniRasporedDnevnika(raspored, zapamti = false) {
+    const mreza = raspored === 'mreza';
+    STANJE.raspored = mreza ? 'mreza' : 'lista';
+    if (zapamti) { try { localStorage.setItem(LS_RASPORED, STANJE.raspored); } catch {} }
+    const omot = document.getElementById('list-wrap');
+    if (omot) omot.classList.toggle('mreza', mreza);
+    const dLista = document.getElementById('layout-list-btn');
+    const dMreza = document.getElementById('layout-grid-btn');
+    if (dLista) { dLista.classList.toggle('active', !mreza); dLista.setAttribute('aria-pressed', String(!mreza)); }
+    if (dMreza) { dMreza.classList.toggle('active', mreza); dMreza.setAttribute('aria-pressed', String(mreza)); }
+    // U mreži su zvuk i video sakriveni iza oznake, pa ne smeju da nastave da sviraju nevidljivi.
+    if (mreza) document.querySelectorAll('#journal-feed audio, #journal-feed video').forEach(m => { try { m.pause(); } catch {} });
+  }
+
+  // Kratka oznaka zvuka i videa za pločicu u mreži (npr. „♪ 1 · ▶ 2“).
+  function oznakaAvPriloga(brZvuka, brVidea) {
+    const delovi = [];
+    if (brZvuka > 0) delovi.push('♪ ' + brZvuka);
+    if (brVidea > 0) delovi.push('▶ ' + brVidea);
+    return delovi.join(' · ');
+  }
+
   function htmlPriloziZapisa(prilozi, uDetalju = false) {
     if (!prilozi || !prilozi.length) return '';
     const slike = [];
     const av = [];
     const preloadMod = uDetalju ? 'metadata' : 'none';
+    let brZvuka = 0;
+    let brVidea = 0;
     for (const p of prilozi) {
       let src = '';
       if (p.lokalniBlob) {
@@ -2820,8 +2853,10 @@
         const imgSrc = (!uDetalju && !p.lokalniBlob) ? urlSliciceMedija(src) : src;
         slike.push(`<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(imgSrc)}" loading="lazy" decoding="async" alt="Fotografija sa terena"></a>`);
       } else if (p.vrsta === 'zvuk') {
+        brZvuka++;
         av.push(`<audio controls preload="${preloadMod}" src="${esc(src)}"></audio>`);
       } else if (p.vrsta === 'video') {
+        brVidea++;
         if (p.obrada_status === 'obrada') {
           av.push(`<div class="video-proc-note">${esc(t('videoObrada'))}</div>`);
         }
@@ -2829,8 +2864,8 @@
       }
     }
     return `
-      ${slike.length ? `<div class="entry-media-grid">${slike.join('')}</div>` : ''}
-      ${av.length ? `<div class="entry-media-full">${av.join('')}</div>` : ''}
+      ${slike.length ? `<div class="entry-media-grid"${slike.length > 1 ? ` data-vise="${slike.length - 1}"` : ''}>${slike.join('')}</div>` : ''}
+      ${av.length ? `<div class="entry-media-full" data-oznaka="${esc(oznakaAvPriloga(brZvuka, brVidea))}">${av.join('')}</div>` : ''}
     `;
   }
 
@@ -2934,7 +2969,7 @@
                  <button type="button" class="link-btn danger" data-del-id="${esc(z.id)}">${esc(t('obrisiMoj'))}</button>`
               : '');
         return `
-          <article class="entry-card ${z.uTelefonu ? 'queued' : ''}" data-card-id="${esc(z.id)}">
+          <article class="entry-card ${z.uTelefonu ? 'queued' : ''}" data-card-id="${esc(z.id)}" data-card-idx="${idx}">
             <div class="entry-head">
               <div>
                 <span class="entry-team-badge">${esc(z.tim)}</span>
@@ -2963,6 +2998,20 @@
         : '';
 
       feed.innerHTML = karticeHtml + viseHtml;
+
+      // Mreža: dodir na pločicu (van dugmadi i polja za izmenu) otvara ceo zapis sa svim prilozima.
+      feed.onclick = ev => {
+        if (STANJE.raspored !== 'mreza') return;
+        const meta = ev.target;
+        if (!meta || !meta.closest) return;
+        if (meta.closest('button, select, textarea, input, .inline-edit-holder')) return;
+        const kartica = meta.closest('[data-card-idx]');
+        if (!kartica) return;
+        const z = zapisi[Number(kartica.getAttribute('data-card-idx'))];
+        if (!z) return;
+        ev.preventDefault();
+        otvoriDetaljZapisa(z);
+      };
 
       feed.querySelectorAll('[data-goto-idx]').forEach(btn => {
         btn.onclick = () => {
@@ -3687,6 +3736,9 @@
       postaviFilter(STANJE.sesija.tim, 0);
     };
 
+    document.getElementById('layout-list-btn').onclick = () => primeniRasporedDnevnika('lista', true);
+    document.getElementById('layout-grid-btn').onclick = () => primeniRasporedDnevnika('mreza', true);
+
     const listWrap = document.getElementById('list-wrap');
     listWrap.addEventListener('scroll', () => {
       if (STANJE.pogled !== 'lista') return;
@@ -4010,6 +4062,11 @@
     }
     crtajPrivatnost();
     poveziDogadjaje();
+    {
+      let sacuvanRaspored = '';
+      try { sacuvanRaspored = localStorage.getItem(LS_RASPORED) || ''; } catch {}
+      primeniRasporedDnevnika(pocetniRasporedDnevnika(sacuvanRaspored, window.innerWidth));
+    }
     primeniFilterIzAdrese();
     if (STANJE.pogled === 'lista') postaviPogled('lista');
     primeniJezik();
