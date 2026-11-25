@@ -9,9 +9,9 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="maplibre-gl.css">
-  <link rel="stylesheet" href="app.css?v=2026-11-24.2">
+  <link rel="stylesheet" href="app.css?v=2026-11-25.1">
   <script src="maplibre-gl.js" defer></script>
-  <script src="app.js?v=2026-11-24.2" defer></script>
+  <script src="app.js?v=2026-11-25.1" defer></script>
 </head>
 <body>
   <div class="app-shell" id="app-shell">
@@ -286,6 +286,7 @@
       <div class="sheet-body">
         <div class="meta-strip" id="comp-meta-strip"></div>
         <div class="composer-prompt" data-sr="Vežba 1: Kako beležiš doživljaj ovog prostora, okruženja ili kretanja kroz izabrani komšiluk / blok / naselje?" data-en="Exercise 1: How do you capture the experience of this space, surroundings, or movement through your chosen neighborhood / block?">Vežba 1: Kako beležiš doživljaj ovog prostora, okruženja ili kretanja kroz izabrani komšiluk / blok / naselje?</div>
+        <div class="alert-box warn" id="comp-storage-warn" role="alert" hidden></div>
         <div class="alert-box err" id="comp-error" hidden></div>
         <div class="gps-inline-help" id="comp-gps-help" hidden>
           <button type="button" class="btn-secondary" id="btn-comp-gps-help" aria-expanded="false" aria-controls="comp-gps-steps" data-sr="Kako da dozvolim lokaciju" data-en="How to allow location">Kako da dozvolim lokaciju</button>
@@ -425,6 +426,7 @@
           <button type="button" class="btn-secondary" id="btn-transfer-session" style="width:100%" data-sr="↗ Kopiraj link za prenos ove prijave (isto mesto)" data-en="↗ Copy link to transfer this sign-in (same seat)">↗ Kopiraj link za prenos ove prijave (isto mesto)</button>
           <span class="hint" data-sr="Samo za tvoj telefon kada prelaziš u Chrome ili Safari (prenosi isto mesto). Drugi članovi tima skeniraju timski QR kod na svojim telefonima." data-en="Only for switching browsers on your own phone (reuses the same seat). Other team members scan the team QR code on their own phones.">Samo za tvoj telefon kada prelaziš u Chrome ili Safari (prenosi isto mesto). Drugi članovi tima skeniraju timski QR kod na svojim telefonima.</span>
         </div>
+        <span class="hint" id="prof-izdanje"></span>
       </div>
       <div class="sheet-foot">
         <button type="button" class="btn-secondary" id="btn-sync-now" data-sr="Sinhronizuj sad" data-en="Sync now">Sinhronizuj sad</button>

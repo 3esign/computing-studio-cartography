@@ -3,7 +3,8 @@
   'use strict';
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
-  const VERZIJA_APP = '2026-11-24.2';
+  // Ne menja se ručno: upisuje je `node tools/studenti.cjs --zakljucaj` (izvor je tools/studentski-otisak.json).
+  const VERZIJA_APP = '2026-11-25.1';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -56,6 +57,7 @@
     korisnikMarker: null,
     novaVerzijaDostupna: '',
     obaveznoOsvezavanje: false,
+    skladisteNeRadi: false, // proba pri pokretanju: ova kartica ne može da sačuva prilog na telefonu
     swRegistracija: null
   };
 
@@ -175,7 +177,9 @@
       snimiZvuk: 'Snimi zvuk',
       novaVerzijaBaner: 'Dostupna je nova verzija aplikacije. Osveži stranicu.',
       obaveznoOsvezavanjeBaner: 'Ova kartica koristi staru verziju aplikacije. Osveži pre slanja zapisa.',
-      potrebnoOsvezavanje: 'Prvo osveži aplikaciju (dugme na vrhu ekrana) — zapisi ostaju sačuvani u telefonu.'
+      potrebnoOsvezavanje: 'Prvo osveži aplikaciju (dugme na vrhu ekrana) — zapisi ostaju sačuvani u telefonu.',
+      skladisteNeRadi: 'Ova kartica ne može da sačuva zapis na telefonu. Ako je privatna kartica, otvori sajt u običnoj kartici i tamo napravi zapis.',
+      izdanjeApp: 'Izdanje aplikacije:'
     },
     en: {
       uzivo: 'Live',
@@ -239,7 +243,9 @@
       snimiZvuk: 'Record sound',
       novaVerzijaBaner: 'A newer version of the app is available. Refresh the page.',
       obaveznoOsvezavanjeBaner: 'This tab is running an outdated app version. Refresh before sending entries.',
-      potrebnoOsvezavanje: 'Please refresh the app first (button at the top) — your entries stay safe on your phone.'
+      potrebnoOsvezavanje: 'Please refresh the app first (button at the top) — your entries stay safe on your phone.',
+      skladisteNeRadi: 'This tab cannot save entries on the phone. If it is a private tab, open the site in a regular tab and make your entry there.',
+      izdanjeApp: 'App release:'
     }
   };
 
@@ -301,6 +307,7 @@
     osveziStatusTraku();
     osveziGpsPrikaz();
     osveziBanerVerzije();
+    osveziUpozorenjeSkladista();
     crtajPodatke();
   }
 
@@ -506,7 +513,46 @@
     }
   }
 
+  // --- Proba skladišta: može li ova kartica da sačuva prilog na telefonu ---
+  // Privatna kartica Safarija odbija Blob u IndexedDB (WebKit bagovi 198278 i 286561), pa zapis sa slikom ili
+  // zvukom tu ne može da čeka slanje. Proba upiše i obriše jedan mali Blob. Vraća false samo kad je upis stvarno
+  // odbijen; ako skladište ne odgovori u roku, ne tvrdi ništa (true), da ispravna kartica ne dobije lažnu poruku.
+  function probajSkladiste(otvori, napraviBlob, rokMs) {
+    const upis = (async () => {
+      try {
+        const db = await otvori();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('kes', 'readwrite');
+          const s = tx.objectStore('kes');
+          s.put({ kljuc: 'proba_skladista', vrednost: napraviBlob() });
+          s.delete('proba_skladista');
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error);
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    return Promise.race([upis, new Promise(resolve => setTimeout(() => resolve(true), rokMs || 4000))]);
+  }
+
+  function osveziUpozorenjeSkladista() {
+    const el = document.getElementById('comp-storage-warn');
+    if (!el) return;
+    el.textContent = STANJE.skladisteNeRadi ? t('skladisteNeRadi') : '';
+    el.hidden = !STANJE.skladisteNeRadi;
+  }
+
   // --- Otkrivanje adrese PC servera (endpoint.json + raw.githubusercontent.com rezerva bez čekanja CDN-a) ---
+  // Adresa servera iz linka (?api=) važi samo kad je aplikacija otvorena sa lokalne adrese, za razvoj i testove.
+  // Na javnom sajtu se ne čita: aplikacija na adresu servera šalje tajnu uređaja, pa bi je lažan link odneo.
+  function apiIzAdrese(hostname, upit) {
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') return '';
+    return (new URLSearchParams(upit || '').get('api') || '').replace(/\/+$/, '');
+  }
+
   async function procitajJsonSaRoka(url, rokMs = 4500) {
     const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const tajmer = ctrl ? setTimeout(() => ctrl.abort(), rokMs) : null;
@@ -522,9 +568,9 @@
   }
 
   async function razresiApiBazu(prisilnoOsvezi = false) {
-    const q = new URLSearchParams(location.search);
-    if (q.get('api')) {
-      STANJE.apiBaza = q.get('api').replace(/\/+$/, '');
+    const zadata = apiIzAdrese(location.hostname, location.search);
+    if (zadata) {
+      STANJE.apiBaza = zadata;
       return STANJE.apiBaza;
     }
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
@@ -1737,7 +1783,9 @@
         toast(poslato ? t('sacuvanoUzivo') : t(idePozadinom ? 'saljeSeVeliki' : 'sacuvanoOffline'));
       }
     } catch (e) {
-      errEl.textContent = 'Greška pri čuvanju: ' + (e && e.message ? e.message : String(e));
+      errEl.textContent = STANJE.skladisteNeRadi
+        ? t('skladisteNeRadi')
+        : 'Greška pri čuvanju: ' + (e && e.message ? e.message : String(e));
       errEl.hidden = false;
     } finally {
       btn.disabled = false;
@@ -3660,6 +3708,7 @@
           `Tim ${s.tim} · ${s.oznaka || 'aktivan uređaj'}${mesta}`;
       };
       ispisiRezime();
+      document.getElementById('prof-izdanje').textContent = t('izdanjeApp') + ' ' + VERZIJA_APP;
       document.getElementById('prof-nadimak').value = STANJE.sesija.nadimak || '';
       const qb = document.getElementById('prof-queue-box');
       if (STANJE.lokalniRed.length > 0) {
@@ -4076,6 +4125,14 @@
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => { STANJE.swRegistracija = reg; }).catch(() => {});
     }
+
+    // Proba skladišta teče sa strane i ne zadržava pokretanje; poruka se pojavi samo ako je upis odbijen.
+    probajSkladiste(otvoriBazu, () => new Blob(['x'], { type: 'text/plain' })).then(radi => {
+      if (radi) return;
+      STANJE.skladisteNeRadi = true;
+      osveziUpozorenjeSkladista();
+      toast(t('skladisteNeRadi'));
+    });
 
     // Paralelno učitaj lokalni red, poslednje keširano stanje iz IndexedDB i adresu servera (endpoint.json)
     const apiBazaPromis = razresiApiBazu(false);
