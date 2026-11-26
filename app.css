@@ -1440,6 +1440,15 @@ button, input, textarea, select {
   text-overflow: ellipsis;
   min-height: 32px;
 }
+.vezba-switch .seg-btn.zavrsena,
+.vezba-switch .seg-btn:disabled {
+  background: #ececec;
+  color: #9a9a9a;
+  box-shadow: none;
+  cursor: default;
+  text-decoration: line-through;
+  opacity: 1;
+}
 .vezba-switch .seg-btn.active {
   background: var(--accent-soft);
   color: var(--ink);

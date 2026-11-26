@@ -4,7 +4,7 @@
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
   // Ne menja se ručno: upisuje je `node tools/studenti.cjs --zakljucaj` (izvor je tools/studentski-otisak.json).
-  const VERZIJA_APP = '2026-11-26.1';
+  const VERZIJA_APP = '2026-11-26.2';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -320,6 +320,15 @@
     return (STANJE.teme || []).filter(v => v && Number(v.aktivna) === 1);
   }
 
+  // Vežba kojoj je prošao rok: zatvorena je, a rok joj je upisan. U biraču ostaje kao sivo dugme koje se ne bira.
+  function jeZavrsenaVezba(v) {
+    return Boolean(v && Number(v.aktivna) !== 1 && v.rok);
+  }
+
+  function vezbeUBiracu() {
+    return (STANJE.teme || []).filter(v => v && (Number(v.aktivna) === 1 || jeZavrsenaVezba(v)));
+  }
+
   // Vežba u kojoj student radi: njegov izbor ako je ta vežba otvorena, inače najmanja otvorena po serveru.
   // Napredak i rang broje zapise te vežbe (server: rangTima u server/lib/stanje.cjs); menjaju se zajedno.
   function aktivnaNedelja() {
@@ -348,7 +357,7 @@
   function primeniIzborVezbe() {
     const sve = STANJE.sveStatistika || { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} };
     const n = aktivnaNedelja();
-    const statVezbe = otvoreneVezbe().length > 1 && sve.po_vezbi && sve.po_vezbi[n];
+    const statVezbe = vezbeUBiracu().length > 1 && sve.po_vezbi && sve.po_vezbi[n];
     STANJE.poVezbi = Boolean(statVezbe);
     if (!statVezbe) {
       STANJE.serverZapisi = STANJE.sviServerZapisi;
@@ -362,8 +371,17 @@
   // Novo stanje sa servera ili iz keša telefona.
   function primiStanje(izvor) {
     const s = izvor || {};
+    const radioU = STANJE.teme && STANJE.teme.length ? aktivnaNedelja() : 0;
     STANJE.aktivnaNedelja = Number(s.aktivnaNedelja) || 1;
     STANJE.teme = Array.isArray(s.teme) ? s.teme : [];
+    // Vežba u kojoj je student radio je završena dok je aplikacija bila otvorena: kaže mu se gde sada upisuje.
+    const stara = radioU ? temaVezbe(radioU) : null;
+    if (stara && jeZavrsenaVezba(stara) && aktivnaNedelja() !== radioU && otvoreneVezbe().length) {
+      const nova = temaVezbe(aktivnaNedelja());
+      toast(STANJE.jezik === 'en'
+        ? `${nazivVezbe(stara, true)} has ended. You are now writing in ${nazivVezbe(nova, true)}.`
+        : `${nazivVezbe(stara, true)} je završena. Sada upisuješ u ${nazivVezbe(nova, true)}.`);
+    }
     STANJE.sviServerZapisi = Array.isArray(s.zapisi) ? s.zapisi : [];
     STANJE.sveStatistika = s.statistika || { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} };
     const kontakt = String(s.kontakt || '').slice(0, 120);
@@ -392,18 +410,19 @@
 
   // Birač vežbe (traka pogleda i prozor za unos). Pregrađuje se samo kad se promeni sadržaj, da dodir ne padne u prazno.
   function crtajBiracVezbe() {
-    const otvorene = otvoreneVezbe();
+    const otvorene = vezbeUBiracu();
     const n = aktivnaNedelja();
     const en = STANJE.jezik === 'en';
-    const potpis = otvorene.length < 2 ? '' : [STANJE.jezik, n, otvorene.map(v => `${v.nedelja}:${v.kratko_sr}:${v.kratko_en}`).join(',')].join('|');
+    const potpis = otvorene.length < 2 ? '' : [STANJE.jezik, n, otvorene.map(v => `${v.nedelja}:${v.kratko_sr}:${v.kratko_en}:${jeZavrsenaVezba(v) ? 'z' : 'o'}`).join(',')].join('|');
     document.querySelectorAll('[data-vezba-switch]').forEach(kutija => {
       kutija.hidden = !potpis;
       if (kutija.getAttribute('data-potpis') === potpis) return;
       kutija.setAttribute('data-potpis', potpis);
       kutija.innerHTML = !potpis ? '' :
         `<span class="vezba-cap">${esc(en ? 'Exercise' : 'Vežba')}</span>` +
-        `<div class="seg-group" role="group" aria-label="${esc(en ? 'Choose exercise' : 'Izbor vežbe')}">${otvorene.map(v =>
-          `<button type="button" class="seg-btn${Number(v.nedelja) === n ? ' active' : ''}" data-vezba="${Number(v.nedelja)}" aria-pressed="${Number(v.nedelja) === n}" title="${esc(nazivVezbe(v))}">${esc(nazivVezbe(v, true))}</button>`
+        `<div class="seg-group" role="group" aria-label="${esc(en ? 'Choose exercise' : 'Izbor vežbe')}">${otvorene.map(v => jeZavrsenaVezba(v)
+          ? `<button type="button" class="seg-btn zavrsena" disabled aria-disabled="true" title="${esc(nazivVezbe(v) + (en ? ' · ended' : ' · završena'))}">${esc(nazivVezbe(v, true))}</button>`
+          : `<button type="button" class="seg-btn${Number(v.nedelja) === n ? ' active' : ''}" data-vezba="${Number(v.nedelja)}" aria-pressed="${Number(v.nedelja) === n}" title="${esc(nazivVezbe(v))}">${esc(nazivVezbe(v, true))}</button>`
         ).join('')}</div>`;
     });
   }
