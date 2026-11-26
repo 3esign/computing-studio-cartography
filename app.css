@@ -1409,3 +1409,45 @@ button, input, textarea, select {
 .list-wrap.mreza .entry-card:has(.inline-edit-holder:not([hidden])) { grid-column: 1 / -1; cursor: default; }
 .list-wrap.mreza .entry-card:has(.inline-edit-holder:not([hidden])) .entry-text { display: block; -webkit-line-clamp: unset; line-clamp: unset; }
 .list-wrap.mreza .entry-card .lvl-badge::before { content: none; }
+
+/* ==========================================================================
+   BIRAČ VEŽBE (traka pogleda i prozor za unos) I PANEL VEŽBE
+   ========================================================================== */
+.vezba-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.vezba-switch[hidden] { display: none; }
+.vezba-switch .vezba-cap {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.vezba-switch .seg-group {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.vezba-switch .seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 32px;
+}
+.vezba-switch .seg-btn.active {
+  background: var(--accent-soft);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px #dfd0a3;
+}
+.vezba-body { display: grid; gap: 10px; font-size: 14px; line-height: 1.5; }
+.vezba-body p { margin: 0; }
+.vezba-body h3 { margin: 6px 0 0; font-size: 14.5px; }
+.vezba-body ul, .vezba-body ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.vezba-body .vezba-napomena { font-size: 12.5px; color: var(--ink-soft); }
+.vezba-kako { margin: 8px 0 0; }

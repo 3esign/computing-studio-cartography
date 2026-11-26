@@ -4,7 +4,7 @@
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
   // Ne menja se ručno: upisuje je `node tools/studenti.cjs --zakljucaj` (izvor je tools/studentski-otisak.json).
-  const VERZIJA_APP = '2026-11-25.1';
+  const VERZIJA_APP = '2026-11-26.1';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -15,6 +15,9 @@
   const LS_PRVI_PUT = 'uz_upoznat_v1';
   const LS_PRIVATNOST = 'uz_privatnost_v1';
   const LS_RASPORED = 'uz_dnevnik_raspored_v1';
+  const LS_VEZBA = 'uz_vezba_v1';          // broj vežbe koju je student izabrao na ovom telefonu
+  const LS_SNIMANJE = 'uz_snimanje_ok_v1'; // vežbe čije je uputstvo o snimanju potvrđeno, npr. "2"
+  const ZASTOJ_SLANJA_MS = 25000;          // slanje priloga koje ovoliko dugo ne pošalje nijedan bajt se prekida
   const SS_PENDING_QR = 'uz_pending_qr_v1';
   const RAW_ENDPOINT_FALLBACK = 'https://raw.githubusercontent.com/3esign/computing-studio-cartography/main/endpoint.json';
   const GPS_SVEZ_MS = 3 * 60 * 1000;      // 3 min posle buđenja ekrana
@@ -35,8 +38,15 @@
     filterClan: 0,          // 0 = ceo tim, inače uredjaj_id člana čiji se dnevnik prikazuje
     rangOtvoreni: new Set(), // timovi čiji su članovi rašireni u rang-listi
     trebaUokviriti: false,  // posle izbora tima ili člana mapa se jednom uokviri na njihove zapise
-    aktivnaNedelja: 1,
-    serverZapisi: [],
+    aktivnaNedelja: 1,      // najmanja otvorena vežba po serveru; vežbu u kojoj student radi daje aktivnaNedelja()
+    izabranaVezba: (() => { try { return Number(localStorage.getItem(LS_VEZBA)) || 0; } catch { return 0; } })(), // 0 = još nije birao
+    teme: [],               // vežbe sa tekstovima (server, tabela teme)
+    kontakt: '',            // adresa za pitanja i zahteve; stiže sa servera, u kodu aplikacije je nema
+    sviServerZapisi: [],    // zapisi svih vežbi, onako kako su stigli sa servera
+    sveStatistika: null,    // statistika sa servera pre izbora vežbe
+    poVezbi: false,         // true kad su otvorene bar dve vežbe, pa se prikazuje samo izabrana
+    slanjeNapredak: null,   // { procenat } dok se prilog šalje
+    serverZapisi: [],       // zapisi koji se prikazuju: izabrana vežba, ili svi dok je otvorena samo jedna
     serverStatistika: { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} },
     poslednjiEtag: '',
     ucitavanjeStanjaUToku: false,
@@ -274,25 +284,315 @@
     ['Aplikaciju, vezu do servera i podlogu mape isporučuju spoljni servisi (GitHub, Cloudflare, OpenFreeMap, Carto, OpenStreetMap); oni pri tome vide tvoju IP adresu.',
      'The app, the link to the server and the base map are delivered by outside services (GitHub, Cloudflare, OpenFreeMap, Carto, OpenStreetMap); they see your IP address in the process.'],
     ['Podaci služe za nastavu na predmetu Osnove računarstva.',
-     'The data is used for teaching in the Computing Fundamentals course.']
+     'The data is used for teaching in the Computing Fundamentals course.'],
+    ['Sistem vodi Semir Poturak, nastavnik predmeta. Pitanja i zahtevi: {kontakt}.',
+     'The system is run by Semir Poturak, the course teacher. Questions and requests: {kontakt}.'],
+    ['Čuvamo: tvoj potpis, tim, oznaku telefona i tvoje zapise (tačku, vreme, tekst, priloge). Ne tražimo prezime, broj indeksa ni nalog.',
+     'We keep: your signature, team, phone label and your entries (point, time, text, attachments). We do not ask for a surname, student number or account.'],
+    ['Zapisi se ne koriste u naučnom radu. Ako se to promeni, bićeš posebno pitan, a tvoj odgovor neće uticati na ocenu.',
+     'Entries are not used in research. If that changes, you will be asked separately, and your answer will not affect your grade.'],
+    ['Ako se vraćaš na isto mesto, mapa pokazuje kada si tamo bio. Potpiši se nadimkom ako ne želiš da se to veže za tvoje ime.',
+     'If you keep returning to one place, the map shows when you were there. Sign with a nickname if you do not want that tied to your name.'],
+    ['Ko god je na snimku, ili ti sam, može tražiti sklanjanje zapisa mejlom. Zapis se sakriva sa mape i iz Dnevnika; na zahtev se briše i iz rezervi.',
+     'Anyone in a recording, or you, can ask by email for an entry to be taken down. It is hidden from the map and the Journal; on request it is also deleted from backups.']
   ];
+
+  // {kontakt} u tekstu je adresa koju šalje server (STANJE.kontakt). Dok je nema, stoji opis umesto adrese.
+  function saKontaktom(tekst, en) {
+    return String(tekst).replace('{kontakt}', STANJE.kontakt || (en ? 'ask the course teacher' : 'javi se nastavniku'));
+  }
 
   function crtajPrivatnost() {
     document.querySelectorAll('[data-privacy-list]').forEach(ul => {
       ul.textContent = '';
       for (const [sr, en] of PRIVATNOST) {
         const li = document.createElement('li');
-        li.setAttribute('data-sr', sr);
-        li.setAttribute('data-en', en);
-        li.textContent = sr;
+        li.setAttribute('data-sr', saKontaktom(sr, false));
+        li.setAttribute('data-en', saKontaktom(en, true));
+        li.textContent = li.getAttribute(STANJE.jezik === 'en' ? 'data-en' : 'data-sr');
         ul.appendChild(li);
       }
     });
   }
 
+  // --- Vežbe: otvorenih može biti više i student bira svoju; tekstovi stižu sa servera (tabela teme, server/lib/vezbe.cjs) ---
+  function otvoreneVezbe() {
+    return (STANJE.teme || []).filter(v => v && Number(v.aktivna) === 1);
+  }
+
+  // Vežba u kojoj student radi: njegov izbor ako je ta vežba otvorena, inače najmanja otvorena po serveru.
+  // Napredak i rang broje zapise te vežbe (server: rangTima u server/lib/stanje.cjs); menjaju se zajedno.
+  function aktivnaNedelja() {
+    const izbor = Number(STANJE.izabranaVezba) || 0;
+    if (izbor && otvoreneVezbe().some(v => Number(v.nedelja) === izbor)) return izbor;
+    return Number(STANJE.aktivnaNedelja) || 1;
+  }
+
+  function temaVezbe(n) {
+    const broj = Number(n) || aktivnaNedelja();
+    return (STANJE.teme || []).find(v => v && Number(v.nedelja) === broj) || null;
+  }
+
+  function nazivVezbe(v, kratak) {
+    const en = STANJE.jezik === 'en';
+    if (!v) return (en ? 'Exercise ' : 'Vežba ') + aktivnaNedelja();
+    if (kratak) {
+      const k = en ? (v.kratko_en || v.kratko_sr) : v.kratko_sr;
+      return k ? `${v.nedelja} · ${k}` : String(v.nedelja);
+    }
+    return (en ? v.naziv_en : v.naziv_sr) || ((en ? 'Exercise ' : 'Vežba ') + v.nedelja);
+  }
+
+  // STANJE.serverZapisi i STANJE.serverStatistika su pogled na izabranu vežbu; iz njih čitaju mapa, Dnevnik, napredak i rang.
+  // Dok je otvorena samo jedna vežba ništa se ne filtrira, pa je prikaz isti kao pre uvođenja birača.
+  function primeniIzborVezbe() {
+    const sve = STANJE.sveStatistika || { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} };
+    const n = aktivnaNedelja();
+    const statVezbe = otvoreneVezbe().length > 1 && sve.po_vezbi && sve.po_vezbi[n];
+    STANJE.poVezbi = Boolean(statVezbe);
+    if (!statVezbe) {
+      STANJE.serverZapisi = STANJE.sviServerZapisi;
+      STANJE.serverStatistika = sve;
+      return;
+    }
+    STANJE.serverZapisi = STANJE.sviServerZapisi.filter(z => Number(z.nedelja || 1) === n);
+    STANJE.serverStatistika = Object.assign({}, sve, statVezbe);
+  }
+
+  // Novo stanje sa servera ili iz keša telefona.
+  function primiStanje(izvor) {
+    const s = izvor || {};
+    STANJE.aktivnaNedelja = Number(s.aktivnaNedelja) || 1;
+    STANJE.teme = Array.isArray(s.teme) ? s.teme : [];
+    STANJE.sviServerZapisi = Array.isArray(s.zapisi) ? s.zapisi : [];
+    STANJE.sveStatistika = s.statistika || { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} };
+    const kontakt = String(s.kontakt || '').slice(0, 120);
+    if (kontakt !== STANJE.kontakt) {
+      STANJE.kontakt = kontakt;
+      crtajPrivatnost();
+    }
+    primeniIzborVezbe();
+    primeniTekstoveVezbe();
+  }
+
+  function postaviDvojezicno(el, sr, en) {
+    if (!el || !sr) return;
+    el.setAttribute('data-sr', sr);
+    el.setAttribute('data-en', en || sr);
+    el.textContent = STANJE.jezik === 'en' ? (en || sr) : sr;
+  }
+
+  function dodajDvojezicno(roditelj, oznaka, sr, en, klasa) {
+    const el = document.createElement(oznaka);
+    if (klasa) el.className = klasa;
+    postaviDvojezicno(el, sr, en);
+    roditelj.appendChild(el);
+    return el;
+  }
+
+  // Birač vežbe (traka pogleda i prozor za unos). Pregrađuje se samo kad se promeni sadržaj, da dodir ne padne u prazno.
+  function crtajBiracVezbe() {
+    const otvorene = otvoreneVezbe();
+    const n = aktivnaNedelja();
+    const en = STANJE.jezik === 'en';
+    const potpis = otvorene.length < 2 ? '' : [STANJE.jezik, n, otvorene.map(v => `${v.nedelja}:${v.kratko_sr}:${v.kratko_en}`).join(',')].join('|');
+    document.querySelectorAll('[data-vezba-switch]').forEach(kutija => {
+      kutija.hidden = !potpis;
+      if (kutija.getAttribute('data-potpis') === potpis) return;
+      kutija.setAttribute('data-potpis', potpis);
+      kutija.innerHTML = !potpis ? '' :
+        `<span class="vezba-cap">${esc(en ? 'Exercise' : 'Vežba')}</span>` +
+        `<div class="seg-group" role="group" aria-label="${esc(en ? 'Choose exercise' : 'Izbor vežbe')}">${otvorene.map(v =>
+          `<button type="button" class="seg-btn${Number(v.nedelja) === n ? ' active' : ''}" data-vezba="${Number(v.nedelja)}" aria-pressed="${Number(v.nedelja) === n}" title="${esc(nazivVezbe(v))}">${esc(nazivVezbe(v, true))}</button>`
+        ).join('')}</div>`;
+    });
+  }
+
+  // Slojevi zapisa izabrane vežbe (dugmad u prozoru za unos; ista dugmad čita i uređivanje zapisa u Dnevniku).
+  function crtajOznakeVezbe(v) {
+    const kutija = document.getElementById('comp-tags');
+    if (!kutija || !Array.isArray(v.oznake) || !v.oznake.length) return;
+    const vazece = new Set(v.oznake.map(o => o.oznaka));
+    for (const tg of Array.from(STANJE.kompozitorTagovi)) if (!vazece.has(tg)) STANJE.kompozitorTagovi.delete(tg);
+    kutija.textContent = '';
+    for (const o of v.oznake) {
+      const dugme = dodajDvojezicno(kutija, 'button', o.oznaka, o.en, 'choice-chip' + (STANJE.kompozitorTagovi.has(o.oznaka) ? ' selected' : ''));
+      dugme.type = 'button';
+      dugme.setAttribute('data-tag', o.oznaka);
+    }
+  }
+
+  // Naziv, uvod, saveti, pitanje, zadatak i slojevi izabrane vežbe. Server sa starim kodom ne šalje ove tekstove,
+  // a telefon bez mreže i bez keša ih nema: tada ostaje tekst Vežbe 1 ugrađen u stranicu.
+  let potpisTekstovaVezbe = '';
+  function primeniTekstoveVezbe() {
+    crtajBiracVezbe();
+    const n = aktivnaNedelja();
+    postaviDvojezicno(document.getElementById('rank-title'), `Napredak, timovi i članovi · Zadatak ${n}`, `Progress, teams and members · Task ${n}`);
+    const saSnimanjem = vezbaSaUputstvomSnimanja();
+    document.querySelectorAll('[data-open-snimanje]').forEach(b => { b.hidden = !saSnimanjem; });
+    const v = temaVezbe();
+    if (!v || !v.pitanje_sr) return;
+    const potpis = JSON.stringify(v);
+    if (potpis === potpisTekstovaVezbe) return;
+    potpisTekstovaVezbe = potpis;
+    const el = id => document.getElementById(id);
+    postaviDvojezicno(el('vezba-naslov-dnevnik'), 'Urbani žurnal · ' + v.naziv_sr, 'Urban Journal · ' + v.naziv_en);
+    postaviDvojezicno(el('vezba-uvod-dnevnik'),
+      v.uputstvo_sr + ' Zapažanja svih članova tima i svih timova spajaju se ovde u živu mapu Beograda.',
+      v.uputstvo_en + ' Entries from all team members merge here into a shared map of Belgrade.');
+    postaviDvojezicno(el('vezba-naslov-info'), v.naziv_sr, v.naziv_en);
+    postaviDvojezicno(el('vezba-uvod-info'), v.uputstvo_sr, v.uputstvo_en);
+    postaviDvojezicno(el('vezba-zadatak-info'), v.zadatak_sr, v.zadatak_en);
+    postaviDvojezicno(el('vezba-pitanje'), v.pitanje_sr, v.pitanje_en);
+    const kako = el('vezba-kako-info');
+    if (kako) {
+      kako.textContent = '';
+      const redovi = Array.isArray(v.kako_sr) ? v.kako_sr : [];
+      redovi.forEach((sr, i) => dodajDvojezicno(kako, 'li', sr, (v.kako_en || [])[i]));
+      kako.hidden = redovi.length === 0;
+    }
+    crtajOznakeVezbe(v);
+  }
+
+  // --- Uputstvo o snimanju ljudi: potvrđuje se jednom po vežbi, pre prvog zapisa u njoj; stalno je dostupno uz privatnost ---
+  const potvrdjenoUOvojKartici = new Set(); // rezerva kad kartica ne može da piše u localStorage (privatna kartica)
+
+  function imaUputstvoSnimanja(v) {
+    return Boolean(v && Array.isArray(v.snimanje_sr) && v.snimanje_sr.length);
+  }
+
+  function vezbaSaUputstvomSnimanja() {
+    const v = temaVezbe();
+    return imaUputstvoSnimanja(v) ? v : (otvoreneVezbe().find(imaUputstvoSnimanja) || null);
+  }
+
+  function trebaPotvrdaSnimanja(n) {
+    const v = temaVezbe(n);
+    if (!imaUputstvoSnimanja(v)) return false;
+    const kljuc = String(v.nedelja);
+    if (potvrdjenoUOvojKartici.has(kljuc)) return false;
+    try { return !String(localStorage.getItem(LS_SNIMANJE) || '').split(',').includes(kljuc); } catch { return true; }
+  }
+
+  let panelVezbeBroj = 0;
+  let poslePanelaVezbe = ''; // '' | 'kompozitor' (otvori nov zapis) | 'kompozitor-nastavi' (vrati započeti zapis)
+
+  function otvoriPanelVezbe(n, posle) {
+    const v = (n && temaVezbe(n)) || vezbaSaUputstvomSnimanja() || temaVezbe();
+    if (!v) return;
+    panelVezbeBroj = Number(v.nedelja);
+    poslePanelaVezbe = posle || '';
+    postaviDvojezicno(document.getElementById('vezba-title'), v.naziv_sr, v.naziv_en);
+    const telo = document.getElementById('vezba-body');
+    telo.textContent = '';
+    dodajDvojezicno(telo, 'p', v.uputstvo_sr, v.uputstvo_en);
+    if (Array.isArray(v.kako_sr) && v.kako_sr.length) {
+      const ul = document.createElement('ul');
+      v.kako_sr.forEach((sr, i) => dodajDvojezicno(ul, 'li', sr, (v.kako_en || [])[i]));
+      telo.appendChild(ul);
+    }
+    if (imaUputstvoSnimanja(v)) {
+      dodajDvojezicno(telo, 'h3', 'Kako snimati ljude', 'Recording people');
+      // Red oblika „1. **Naslov.** tekst“ je pravilo u numerisanoj listi; ostali redovi su pasusi.
+      const pravilo = /^\d+\.\s+\*\*(.+?)\*\*\s*(.*)$/;
+      let lista = null;
+      v.snimanje_sr.forEach((sr, i) => {
+        const en = (v.snimanje_en || [])[i] || sr;
+        const mSr = pravilo.exec(sr);
+        const mEn = pravilo.exec(en);
+        if (!mSr) {
+          lista = null;
+          dodajDvojezicno(telo, 'p', sr, en);
+          return;
+        }
+        if (!lista) {
+          lista = document.createElement('ol');
+          telo.appendChild(lista);
+        }
+        const li = document.createElement('li');
+        dodajDvojezicno(li, 'strong', mSr[1], mEn ? mEn[1] : mSr[1]);
+        li.appendChild(document.createTextNode(' '));
+        dodajDvojezicno(li, 'span', mSr[2], mEn ? mEn[2] : mSr[2]);
+        lista.appendChild(li);
+      });
+      // Red o podešavanju kamere važi samo za iPhone; vidljivost je već odredio kod uz „hint-zvuk-ios“.
+      const izvor = document.getElementById('hint-video-ios');
+      if (izvor && !izvor.hidden) dodajDvojezicno(telo, 'p', izvor.getAttribute('data-sr'), izvor.getAttribute('data-en'), 'vezba-napomena');
+    }
+    const ceka = trebaPotvrdaSnimanja(v.nedelja);
+    postaviDvojezicno(document.getElementById('btn-vezba-razumem'),
+      ceka ? 'Razumem i držaću se ovoga' : 'Razumem',
+      ceka ? 'I understand and will follow this' : 'Got it');
+    otvoriPanel('modal-vezba');
+  }
+
+  function potvrdiPanelVezbe() {
+    const v = temaVezbe(panelVezbeBroj);
+    if (imaUputstvoSnimanja(v)) {
+      const kljuc = String(v.nedelja);
+      potvrdjenoUOvojKartici.add(kljuc);
+      try {
+        const skup = new Set(String(localStorage.getItem(LS_SNIMANJE) || '').split(',').filter(Boolean));
+        skup.add(kljuc);
+        localStorage.setItem(LS_SNIMANJE, Array.from(skup).join(','));
+      } catch {}
+    }
+    const posle = poslePanelaVezbe;
+    poslePanelaVezbe = '';
+    if (posle === 'kompozitor-nastavi') {
+      otvoriPanel('modal-composer');
+      azurirajKompozitorMeta();
+      gpsVecDozvoljen().then(da => { if (da) traziMestoTelefona(); });
+      return;
+    }
+    zatvoriSvePanele();
+    if (posle === 'kompozitor') otvoriKompozitor();
+  }
+
+  function izaberiVezbu(n) {
+    const broj = Number(n) || 0;
+    if (!broj || !otvoreneVezbe().some(v => Number(v.nedelja) === broj)) return;
+    const promena = broj !== aktivnaNedelja();
+    STANJE.izabranaVezba = broj;
+    try { localStorage.setItem(LS_VEZBA, String(broj)); } catch {}
+    if (promena) {
+      // Slojevi su različiti po vežbi; izabrani slojevi stare vežbe ne prelaze u novu.
+      STANJE.kompozitorTagovi.clear();
+      STANJE.dnevnikPrikazano = 30;
+    }
+    primeniIzborVezbe();
+    primeniTekstoveVezbe();
+    azurirajKompozitorMeta();
+    crtajPodatke(true);
+    if (trebaPotvrdaSnimanja(broj)) otvoriPanelVezbe(broj, kompozitorOtvoren() ? 'kompozitor-nastavi' : '');
+  }
+
+  // --- Brojač dana: u koliko različitih dana (po beogradskom vremenu) su zapisi nastali. Prikaz, nije uslov zadatka. ---
+  const FORMAT_DANA = (() => {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Belgrade', year: 'numeric', month: '2-digit', day: '2-digit' }); } catch { return null; }
+  })();
+
+  function danZapisa(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    try { if (FORMAT_DANA) return FORMAT_DANA.format(d); } catch {}
+    return d.toISOString().slice(0, 10);
+  }
+
+  function brojiDane() {
+    const v = temaVezbe();
+    return Boolean(v && Number(v.brojac_dana) === 1);
+  }
+
+  function tekstDana(n) {
+    return STANJE.jezik === 'en' ? `days: ${n}` : `dana: ${n}`;
+  }
+
   function primeniJezik() {
     document.documentElement.lang = STANJE.jezik === 'en' ? 'en' : 'sr-Latn';
     document.getElementById('btn-lang').textContent = STANJE.jezik === 'en' ? 'SR' : 'EN';
+    primeniTekstoveVezbe();
     document.querySelectorAll('[data-sr]').forEach(el => {
       const tekst = el.getAttribute(STANJE.jezik === 'en' ? 'data-en' : 'data-sr');
       if (tekst !== null) el.textContent = tekst;
@@ -603,6 +903,70 @@
     return STANJE.apiBaza;
   }
 
+  // Slanje priloga kroz XMLHttpRequest: jedini put kojim pregledač javlja koliko je bajtova otišlo (fetch to ne ume).
+  // Vraća ono što kodu posle slanja treba od fetch odgovora: status, ok, headers.get i json(). Prekida se u dva slučaja:
+  //  - istekao je ukupni rok (greška AbortError, isto kao kod fetch-a);
+  //  - prenos stoji: ZASTOJ_SLANJA_MS bez ijednog novog bajta dok telo još nije otišlo (greška ZastojSlanja).
+  // Posle zastoja zapis ide rezervnim putem (posaljiJedanIzReda), koji nema čuvara zastoja, da spora veza ne vrti u krug.
+  function posaljiSaNapretkom(url, opcije, zaglavlja, rokMs) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      let gotovo = false;
+      let teloOtislo = false;
+      let cuvar = null;
+      const greska = (ime, poruka) => { const e = new Error(poruka); e.name = ime; return e; };
+      const zavrsi = (fn, v) => {
+        if (gotovo) return;
+        gotovo = true;
+        clearTimeout(rok);
+        clearTimeout(cuvar);
+        fn(v);
+      };
+      const prekini = (ime, poruka) => {
+        zavrsi(reject, greska(ime, poruka));
+        try { xhr.abort(); } catch {}
+      };
+      const rok = setTimeout(() => prekini('AbortError', 'istekao rok slanja'), rokMs);
+      const navijCuvara = () => {
+        clearTimeout(cuvar);
+        if (teloOtislo || gotovo) return;
+        cuvar = setTimeout(() => prekini('ZastojSlanja', 'bez napretka ' + Math.round(ZASTOJ_SLANJA_MS / 1000) + ' s'), ZASTOJ_SLANJA_MS);
+      };
+      const javi = udeo => { try { opcije.napredak(udeo); } catch {} };
+      xhr.open(opcije.method || 'POST', url, true);
+      for (const k of Object.keys(zaglavlja)) xhr.setRequestHeader(k, zaglavlja[k]);
+      xhr.upload.onprogress = e => {
+        navijCuvara();
+        if (e.lengthComputable && e.total > 0) javi(e.loaded / e.total);
+      };
+      xhr.upload.onload = () => {
+        teloOtislo = true;
+        clearTimeout(cuvar);
+        javi(1);
+      };
+      xhr.onload = () => zavrsi(resolve, {
+        status: xhr.status,
+        ok: xhr.status >= 200 && xhr.status < 300,
+        headers: { get: ime => xhr.getResponseHeader(ime) },
+        json: async () => JSON.parse(xhr.responseText)
+      });
+      xhr.onerror = () => zavrsi(reject, greska('TypeError', 'mrežna greška pri slanju'));
+      xhr.onabort = () => zavrsi(reject, greska('AbortError', 'slanje prekinuto'));
+      navijCuvara();
+      xhr.send(opcije.body);
+    });
+  }
+
+  // Udeo poslatih bajtova priloga (0–1) za traku statusa; null kad slanje završi.
+  function javiNapredakSlanja(udeo) {
+    const procenat = udeo === null ? null : Math.max(0, Math.min(100, Math.round(udeo * 100)));
+    const stari = STANJE.slanjeNapredak ? STANJE.slanjeNapredak.procenat : null;
+    if (procenat === stari) return;
+    STANJE.slanjeNapredak = procenat === null ? null : { procenat };
+    osveziStatusTraku();
+  }
+
+
   async function apiPoziv(putanja, opcije = {}, probajReEndpoint = true) {
     const baza = await razresiApiBazu(false);
     if (!baza) throw new Error('PC server trenutno nije povezan.');
@@ -617,13 +981,15 @@
     const ctrl = !opcije.signal && typeof AbortController !== 'undefined' ? new AbortController() : null;
     const tajmer = ctrl ? setTimeout(() => ctrl.abort(), rokMs) : null;
     try {
-      const r = await fetch(
-        baza + putanja,
-        Object.assign({}, opcije, {
-          headers: zaglavlja,
-          signal: opcije.signal || (ctrl ? ctrl.signal : undefined)
-        })
-      );
+      const r = typeof opcije.napredak === 'function' && typeof XMLHttpRequest !== 'undefined'
+        ? await posaljiSaNapretkom(baza + putanja, opcije, zaglavlja, rokMs)
+        : await fetch(
+          baza + putanja,
+          Object.assign({}, opcije, {
+            headers: zaglavlja,
+            signal: opcije.signal || (ctrl ? ctrl.signal : undefined)
+          })
+        );
       // Ako Cloudflare ivica vrati 502/503/504/530 (ugašen ili zamenjen quick-tunnel), osveži endpoint.json!
       if (r.status === 502 || r.status === 503 || r.status === 504 || r.status === 530) {
         throw Object.assign(new Error('Tunel se obnavlja (' + r.status + ')'), { tunelPao: true, status: r.status });
@@ -885,7 +1251,7 @@
   }
 
   // --- Jedinstveni upravljač panelima (uvek najviše jedan otvoren!) ---
-  const SVI_PANELI = ['modal-login', 'modal-info', 'modal-composer', 'modal-detail', 'modal-profile', 'modal-gps-help', 'modal-rank', 'modal-privacy'];
+  const SVI_PANELI = ['modal-login', 'modal-info', 'modal-composer', 'modal-detail', 'modal-profile', 'modal-gps-help', 'modal-rank', 'modal-privacy', 'modal-vezba'];
 
   function otvoriPanel(id) {
     if (id !== 'modal-login') zaustaviQrKameru();
@@ -933,7 +1299,7 @@
     if (brRed > 0) {
       btn.classList.add('queue-active');
       dot.className = 'dot warn';
-      txt.textContent = t('cekaSlanje', brRed);
+      txt.textContent = STANJE.slanjeNapredak ? `↑ ${STANJE.slanjeNapredak.procenat} %` : t('cekaSlanje', brRed);
     } else if (STANJE.serverDostupan) {
       btn.classList.remove('queue-active');
       dot.className = 'dot ok';
@@ -1576,7 +1942,7 @@
     const sadTxt = vremeIzPriloga
       ? `${t('snimljenoKratko')} ${formatVreme(vremeIzPriloga)}`
       : new Date().toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' });
-    const vezbaTxt = STANJE.jezik === 'en' ? `Exercise ${STANJE.aktivnaNedelja}` : `Vežba ${STANJE.aktivnaNedelja}`;
+    const vezbaTxt = nazivVezbe(temaVezbe(), false);
     el.innerHTML = `<span><strong>${esc(timTxt)}</strong></span> · <span>${esc(vezbaTxt)}</span> · <span>${esc(gpsTxt)}</span> · <span>${esc(sadTxt)}</span>`;
   }
 
@@ -1608,6 +1974,11 @@
       pripremiPrijavuPanel();
       return;
     }
+    // Vežba sa uputstvom o snimanju ljudi: prvo uputstvo i potvrda, pa tek onda zapis.
+    if (trebaPotvrdaSnimanja(aktivnaNedelja())) {
+      otvoriPanelVezbe(aktivnaNedelja(), 'kompozitor');
+      return;
+    }
     // Tačka zaostala od ranijeg dodira dugmeta lokacije važi samo ako je sasvim sveža.
     if (!mestoTelefona()) STANJE.gps = null;
     gpsZaZapis = false;
@@ -1624,9 +1995,11 @@
         }
         if (Array.isArray(nacrt.tagovi)) {
           for (const tg of nacrt.tagovi) {
-            STANJE.kompozitorTagovi.add(tg);
+            // Sloj iz nacrta važi samo ako postoji u izabranoj vežbi.
             const chip = document.querySelector(`#comp-tags .choice-chip[data-tag="${CSS.escape(tg)}"]`);
-            if (chip) chip.classList.add('selected');
+            if (!chip) continue;
+            STANJE.kompozitorTagovi.add(tg);
+            chip.classList.add('selected');
           }
         }
       }
@@ -1735,8 +2108,9 @@
         tim: STANJE.sesija.tim,
         nadimak: STANJE.sesija.nadimak || '',
         oznaka_uredjaja: STANJE.sesija.oznaka || '',
-        nedelja: STANJE.aktivnaNedelja || 1,
-        tema: 'subjektivni-dozivljaj',
+        // Vežba izabrana u trenutku čuvanja. Šifru teme upisuje server; ovde ide samo zbog zapisa koji čeka u telefonu.
+        nedelja: aktivnaNedelja(),
+        tema: (temaVezbe() && temaVezbe().sifra) || 'subjektivni-dozivljaj',
         kategorije: Array.from(STANJE.kompozitorTagovi),
         lat: mesto.lat,
         lon: mesto.lon,
@@ -1996,7 +2370,8 @@
     let greskaFd = null;
     t0 = Date.now();
     try {
-      r = await apiPoziv(upit('fd'), { method: 'POST', body: fd, rokMs });
+      // Zapis sa prilogom ide putem koji javlja napredak i prekida zastoj; zapis samo sa tekstom ostaje na fetch-u.
+      r = await apiPoziv(upit('fd'), Object.assign({ method: 'POST', body: fd, rokMs }, pril.length ? { napredak: javiNapredakSlanja } : {}));
       try { j = await r.json(); } catch {}
       dn.fd = opisOdgovora(r, j);
     } catch (e) {
@@ -2005,6 +2380,7 @@
     }
     dn.fd_ms = Date.now() - t0;
     fd = null;
+    javiNapredakSlanja(null);
 
     // Rezervni put (multipart sklopljen ručno kao niz bajtova, bez FormData i Blob-a) ide u dva slučaja:
     //  a) server je odgovorio da je telo stiglo prazno;
@@ -2387,23 +2763,21 @@
       }
       poslednjiPrimenjenGen = mojGen;
       STANJE.poslednjiEtag = j.etag || r.headers.get('etag') || '';
-      STANJE.aktivnaNedelja = j.aktivna_nedelja || 1;
-      STANJE.serverZapisi = Array.isArray(j.zapisi) ? j.zapisi : [];
-      STANJE.serverStatistika = j.statistika || { ukupno_zapisa: 0, otkriveno_m2_ukupno: 0, po_timu: {} };
+      primiStanje({ aktivnaNedelja: j.aktivna_nedelja, teme: j.teme, kontakt: j.kontakt, zapisi: j.zapisi, statistika: j.statistika });
       await idbSacuvajKes('poslednje_stanje', {
         aktivnaNedelja: STANJE.aktivnaNedelja,
-        zapisi: STANJE.serverZapisi,
-        statistika: STANJE.serverStatistika
+        teme: STANJE.teme,
+        kontakt: STANJE.kontakt,
+        zapisi: STANJE.sviServerZapisi,
+        statistika: STANJE.sveStatistika
       });
       crtajPodatke(false);
     } catch {
       // U offline režimu prikaži poslednje keširano stanje
-      if (STANJE.serverZapisi.length === 0) {
+      if (STANJE.sviServerZapisi.length === 0) {
         const kes = await idbProcitajKes('poslednje_stanje');
         if (kes) {
-          STANJE.aktivnaNedelja = kes.aktivnaNedelja || 1;
-          STANJE.serverZapisi = kes.zapisi || [];
-          STANJE.serverStatistika = kes.statistika || STANJE.serverStatistika;
+          primiStanje(kes);
           crtajPodatke(false);
         }
       }
@@ -2414,11 +2788,12 @@
 
   function sviVidljiviZapisi() {
     const serverUuidSkup = new Set();
-    for (const sz of STANJE.serverZapisi) {
+    for (const sz of STANJE.sviServerZapisi) {
       if (sz && sz.uuid_klijenta) serverUuidSkup.add(sz.uuid_klijenta);
     }
     const lokalni = STANJE.lokalniRed
       .filter(q => !q.uuid_klijenta || !serverUuidSkup.has(q.uuid_klijenta))
+      .filter(q => !STANJE.poVezbi || Number(q.nedelja || 1) === aktivnaNedelja())
       .map(q => ({
         id: 'local-' + q.uuid_klijenta,
         uuid_klijenta: q.uuid_klijenta,
@@ -2460,12 +2835,13 @@
       const id = Number(z.uredjaj_id) || 0;
       let c = poId.get(id);
       if (!c) {
-        c = { id, ime: z.autor || 'član tima', zapisa: 0, zadatak: 0, nivoi: [0, 0, 0], vrste: { foto: 0, video: 0, zvuk: 0 }, prvi: z.vreme, poslednji: z.vreme };
+        c = { id, ime: z.autor || 'član tima', zapisa: 0, zadatak: 0, nivoi: [0, 0, 0], vrste: { foto: 0, video: 0, zvuk: 0 }, dani: new Set(), prvi: z.vreme, poslednji: z.vreme };
         poId.set(id, c);
       }
       c.zapisa++;
-      if (Number(z.nedelja || 1) === 1) {
+      if (Number(z.nedelja || 1) === aktivnaNedelja()) {
         c.zadatak++;
+        c.dani.add(danZapisa(z.vreme));
         c.nivoi[nivoZapisa(z) - 1]++;
       }
       for (const p of z.prilozi || []) if (p && c.vrste[p.vrsta] !== undefined) c.vrste[p.vrsta]++;
@@ -2571,7 +2947,8 @@
     const stTim = (STANJE.serverStatistika.po_timu || {})[tim];
     const redovi = [];
     if (STANJE.filterClan) {
-      redovi.push(`${en ? 'Task 1' : 'Zadatak 1'}: ${zbir.zadatak}/${min}${zbir.zadatak >= min ? ' ✓' : ''}`);
+      redovi.push(`${en ? 'Task' : 'Zadatak'} ${aktivnaNedelja()}: ${zbir.zadatak}/${min}${zbir.zadatak >= min ? ' ✓' : ''}` +
+        (brojiDane() && zbir.dani ? ' · ' + tekstDana(zbir.dani.size) : ''));
     } else {
       const z = stTim && stTim.zadatak;
       redovi.push((en ? `entries ${zbir.zapisa} · members with entries ${clanovi.length}` : `zapisa ${zbir.zapisa} · članova sa zapisima ${clanovi.length}`) +
@@ -2721,13 +3098,15 @@
     if (!STANJE.sesija || !STANJE.sesija.uredjaj_id) return null;
     const mojId = Number(STANJE.sesija.uredjaj_id);
     const nivoi = [0, 0, 0];
+    const dani = new Set();
     let zapisa = 0;
     for (const z of STANJE.serverZapisi) {
-      if (Number(z.uredjaj_id) !== mojId || Number(z.nedelja || 1) !== 1) continue;
+      if (Number(z.uredjaj_id) !== mojId || Number(z.nedelja || 1) !== aktivnaNedelja()) continue;
       zapisa++;
       nivoi[nivoZapisa(z) - 1]++;
+      dani.add(danZapisa(z.vreme));
     }
-    return { zapisa, nivoi };
+    return { zapisa, nivoi, dana: dani.size };
   }
 
   function osveziRangCip() {
@@ -2765,7 +3144,7 @@
                   <span class="rank-num">${c.zadatak}/${min}${c.zadatak >= min ? ' ✓' : ''}</span>
                 </button>
                 <div class="rank-line">${trakaNivoa(c.nivoi)}</div>
-                <div class="rank-sub">${esc(nivoiTxt(c.nivoi) + ' · ' + tekstVrsta(c.vrste) + ' · ' + (en ? 'last ' : 'poslednji ') + formatVreme(c.poslednji))}</div>
+                <div class="rank-sub">${esc(nivoiTxt(c.nivoi) + ' · ' + tekstVrsta(c.vrste) + (brojiDane() ? ' · ' + tekstDana(c.dani.size) : '') + ' · ' + (en ? 'last ' : 'poslednji ') + formatVreme(c.poslednji))}</div>
               </li>`).join('')}
             </ul>
           </details>`;
@@ -2777,7 +3156,7 @@
       const fali = Math.max(0, min - ja.zapisa);
       html += `
         <section class="rank-me">
-          <strong>${esc(en ? 'My progress · Task 1' : 'Moj napredak · Zadatak 1')}</strong>
+          <strong>${esc(en ? `My progress · Task ${aktivnaNedelja()}` : `Moj napredak · Zadatak ${aktivnaNedelja()}`)}</strong>
           <div class="rank-line">
             <div class="rank-bar"><i style="width:${procenat(ja.zapisa, min).toFixed(1)}%"></i></div>
             <span class="rank-num">${ja.zapisa}/${min}</span>
@@ -2785,6 +3164,7 @@
           <div class="rank-sub">${esc(fali > 0
             ? (en ? `${fali} more to complete the task` : `još ${fali} do kompletnog zadatka`)
             : (en ? 'Task complete ✓' : 'Zadatak je kompletan ✓'))}</div>
+          ${brojiDane() && ja.zapisa > 0 ? `<div class="rank-sub">${esc(en ? `Different days with entries: ${ja.dana}` : `Različitih dana sa zapisima: ${ja.dana}`)}</div>` : ''}
           ${ja.zapisa > 0 ? `<div class="rank-line">${trakaNivoa(ja.nivoi)}</div><div class="rank-sub">${esc(nivoiTxt(ja.nivoi))}</div>` : ''}
         </section>`;
     }
@@ -3688,6 +4068,15 @@
     document.querySelectorAll('[data-open-privacy]').forEach(b => {
       b.onclick = () => otvoriPanel('modal-privacy');
     });
+    document.querySelectorAll('[data-open-snimanje]').forEach(b => {
+      b.onclick = () => otvoriPanelVezbe(0, '');
+    });
+    document.getElementById('btn-vezba-razumem').onclick = potvrdiPanelVezbe;
+    // Birač vežbe se crta na dva mesta i pregrađuje se, pa dodir hvata dokument.
+    document.addEventListener('click', e => {
+      const dugme = e.target && e.target.closest ? e.target.closest('[data-vezba]') : null;
+      if (dugme) izaberiVezbu(dugme.getAttribute('data-vezba'));
+    });
     document.getElementById('btn-rang').onclick = () => {
       if (STANJE.sesija && STANJE.sesija.tim && !STANJE.rangOtvoreni.size) STANJE.rangOtvoreni.add(STANJE.sesija.tim);
       crtajRangListu();
@@ -3925,19 +4314,20 @@
       }
     };
 
-    document.querySelectorAll('#comp-tags .choice-chip').forEach(chip => {
-      chip.onclick = () => {
-        const tag = chip.getAttribute('data-tag');
-        if (STANJE.kompozitorTagovi.has(tag)) {
-          STANJE.kompozitorTagovi.delete(tag);
-          chip.classList.remove('selected');
-        } else {
-          STANJE.kompozitorTagovi.add(tag);
-          chip.classList.add('selected');
-        }
-        sacuvajNacrtKompozitora();
-      };
-    });
+    // Dugmad slojeva se menjaju sa izabranom vežbom, pa dodir hvata njihova kutija.
+    document.getElementById('comp-tags').onclick = e => {
+      const chip = e.target && e.target.closest ? e.target.closest('.choice-chip') : null;
+      if (!chip) return;
+      const tag = chip.getAttribute('data-tag');
+      if (STANJE.kompozitorTagovi.has(tag)) {
+        STANJE.kompozitorTagovi.delete(tag);
+        chip.classList.remove('selected');
+      } else {
+        STANJE.kompozitorTagovi.add(tag);
+        chip.classList.add('selected');
+      }
+      sacuvajNacrtKompozitora();
+    };
 
     const compTextEl = document.getElementById('comp-text');
     if (compTextEl) {
@@ -4011,6 +4401,9 @@
     (() => {
       const red = document.getElementById('hint-zvuk-ios');
       if (red && /iPhone|iPad|iPod/i.test(navigator.userAgent || '')) red.hidden = false;
+      // Isto važi za red o podešavanju kamere: 122 od 125 videa u Vežbi 1 stiglo je sa iPhone-a, u 1080p ili 4K.
+      const redVideo = document.getElementById('hint-video-ios');
+      if (redVideo && red && !red.hidden) redVideo.hidden = false;
     })();
     // Od 24.11.2026: zasebno polje bez filtera tipova, jer iPhone u polju sa accept zasivi snimak iz Voice Memos.
     document.getElementById('inp-file-zvuk').onchange = async e => {
@@ -4150,10 +4543,8 @@
         await idbUpisiURed(st);
       }
     }
-    if (kesStanja && STANJE.serverZapisi.length === 0) {
-      STANJE.aktivnaNedelja = kesStanja.aktivnaNedelja || 1;
-      STANJE.serverZapisi = Array.isArray(kesStanja.zapisi) ? kesStanja.zapisi : [];
-      STANJE.serverStatistika = kesStanja.statistika || STANJE.serverStatistika;
+    if (kesStanja && STANJE.sviServerZapisi.length === 0) {
+      primiStanje(kesStanja);
       crtajPodatke(false);
     }
     osveziStatusTraku();
