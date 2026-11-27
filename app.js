@@ -4,7 +4,7 @@
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
   // Ne menja se ručno: upisuje je `node tools/studenti.cjs --zakljucaj` (izvor je tools/studentski-otisak.json).
-  const VERZIJA_APP = '2026-11-26.2';
+  const VERZIJA_APP = '2026-11-28.1';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -39,7 +39,8 @@
     rangOtvoreni: new Set(), // timovi čiji su članovi rašireni u rang-listi
     trebaUokviriti: false,  // posle izbora tima ili člana mapa se jednom uokviri na njihove zapise
     aktivnaNedelja: 1,      // najmanja otvorena vežba po serveru; vežbu u kojoj student radi daje aktivnaNedelja()
-    izabranaVezba: (() => { try { return Number(localStorage.getItem(LS_VEZBA)) || 0; } catch { return 0; } })(), // 0 = još nije birao
+    izabranaVezba: (() => { try { return Number(localStorage.getItem(LS_VEZBA)) || 0; } catch { return 0; } })(), // 0 = još nije birao (samo otvorene)
+    pregledVezbe: 0,        // završena vežba izabrana za pregled u ovoj kartici (ne pamti se preko osvežavanja)
     teme: [],               // vežbe sa tekstovima (server, tabela teme)
     kontakt: '',            // adresa za pitanja i zahteve; stiže sa servera, u kodu aplikacije je nema
     sviServerZapisi: [],    // zapisi svih vežbi, onako kako su stigli sa servera
@@ -164,6 +165,9 @@
       gpsGreskaTxt: 'GPS nije očitan · probaj opet',
       josZapisa: n => `Prikaži još zapažanja (još ${n})`,
       nemaZapisa: 'Još nema zapažanja u ovom prikazu. Dodirni „+ Novi zapis“ i zabeleži prvi trag u gradu.',
+      nemaZapisaPregled: 'Nema zapažanja u ovom prikazu.',
+      vezbaSamoPregled: 'Ova vežba je završena (samo pregled). Za novi zapis izaberi otvorenu vežbu.',
+      nemaOtvoreneVezbe: 'Nijedna vežba trenutno nije otvorena za nove zapise.',
       uTelefonuOznaka: 'Sačuvano u telefonu · čeka slanje',
       otkaziRed: 'Otkaži slanje',
       probajOpet: 'Probaj opet',
@@ -227,6 +231,9 @@
       gpsGreskaTxt: 'GPS unavailable · retry',
       josZapisa: n => `Show more entries (${n} left)`,
       nemaZapisa: 'No observations in this view yet. Tap "+ New entry" to record your first city trace.',
+      nemaZapisaPregled: 'No observations in this view.',
+      vezbaSamoPregled: 'This exercise has ended (view only). Switch to an open exercise to add a new entry.',
+      nemaOtvoreneVezbe: 'No exercise is currently open for new entries.',
       uTelefonuOznaka: 'Saved on phone · waiting to sync',
       otkaziRed: 'Cancel queued',
       probajOpet: 'Retry',
@@ -320,7 +327,7 @@
     return (STANJE.teme || []).filter(v => v && Number(v.aktivna) === 1);
   }
 
-  // Vežba kojoj je prošao rok: zatvorena je, a rok joj je upisan. U biraču ostaje kao sivo dugme koje se ne bira.
+  // Vežba kojoj je prošao rok: zatvorena je, a rok joj je upisan. U biraču ostaje za pregled, bez mogućnosti novog zapisa.
   function jeZavrsenaVezba(v) {
     return Boolean(v && Number(v.aktivna) !== 1 && v.rok);
   }
@@ -329,17 +336,30 @@
     return (STANJE.teme || []).filter(v => v && (Number(v.aktivna) === 1 || jeZavrsenaVezba(v)));
   }
 
-  // Vežba u kojoj student radi: njegov izbor ako je ta vežba otvorena, inače najmanja otvorena po serveru.
+  // Vežba koja se trenutno prikazuje: izričito izabrana završena vežba (samo pregled u ovoj kartici),
+  // inače sačuvana otvorena vežba, inače najmanja otvorena po serveru.
   // Napredak i rang broje zapise te vežbe (server: rangTima u server/lib/stanje.cjs); menjaju se zajedno.
   function aktivnaNedelja() {
+    const pregled = Number(STANJE.pregledVezbe) || 0;
+    if (pregled && vezbeUBiracu().some(v => Number(v.nedelja) === pregled)) return pregled;
     const izbor = Number(STANJE.izabranaVezba) || 0;
     if (izbor && otvoreneVezbe().some(v => Number(v.nedelja) === izbor)) return izbor;
+    const otvorene = otvoreneVezbe();
+    if (otvorene.length) return Number(STANJE.aktivnaNedelja) || Number(otvorene[0].nedelja) || 1;
+    if (izbor && vezbeUBiracu().some(v => Number(v.nedelja) === izbor)) return izbor;
     return Number(STANJE.aktivnaNedelja) || 1;
   }
 
   function temaVezbe(n) {
     const broj = Number(n) || aktivnaNedelja();
     return (STANJE.teme || []).find(v => v && Number(v.nedelja) === broj) || null;
+  }
+
+  // True kada prikazana vežba ne prima nove zapise (završena po roku ili nijedna nije otvorena).
+  function jeAktivnaVezbaZatvorena() {
+    const v = temaVezbe();
+    if (v) return Number(v.aktivna) !== 1;
+    return (STANJE.teme || []).length > 0 && otvoreneVezbe().length === 0;
   }
 
   function nazivVezbe(v, kratak) {
@@ -372,11 +392,17 @@
   function primiStanje(izvor) {
     const s = izvor || {};
     const radioU = STANJE.teme && STANJE.teme.length ? aktivnaNedelja() : 0;
+    const bilaOtvorena = radioU ? otvoreneVezbe().some(v => Number(v.nedelja) === radioU) : false;
     STANJE.aktivnaNedelja = Number(s.aktivnaNedelja) || 1;
     STANJE.teme = Array.isArray(s.teme) ? s.teme : [];
+    // Ako je pregledana vežba u međuvremenu ponovo otvorena, preuzima se kao aktivna vežba za rad.
+    if (STANJE.pregledVezbe && otvoreneVezbe().some(v => Number(v.nedelja) === Number(STANJE.pregledVezbe))) {
+      STANJE.izabranaVezba = Number(STANJE.pregledVezbe);
+      STANJE.pregledVezbe = 0;
+    }
     // Vežba u kojoj je student radio je završena dok je aplikacija bila otvorena: kaže mu se gde sada upisuje.
     const stara = radioU ? temaVezbe(radioU) : null;
-    if (stara && jeZavrsenaVezba(stara) && aktivnaNedelja() !== radioU && otvoreneVezbe().length) {
+    if (bilaOtvorena && stara && jeZavrsenaVezba(stara) && aktivnaNedelja() !== radioU && otvoreneVezbe().length) {
       const nova = temaVezbe(aktivnaNedelja());
       toast(STANJE.jezik === 'en'
         ? `${nazivVezbe(stara, true)} has ended. You are now writing in ${nazivVezbe(nova, true)}.`
@@ -408,23 +434,40 @@
     return el;
   }
 
-  // Birač vežbe (traka pogleda i prozor za unos). Pregrađuje se samo kad se promeni sadržaj, da dodir ne padne u prazno.
+  // Birač vežbe (traka pogleda prikazuje otvorene i završene za pregled; prozor za unos samo otvorene).
+  // Pregrađuje se samo kad se promeni sadržaj, da dodir ne padne u prazno.
   function crtajBiracVezbe() {
-    const otvorene = vezbeUBiracu();
+    const sve = vezbeUBiracu();
+    const otvorene = otvoreneVezbe();
     const n = aktivnaNedelja();
     const en = STANJE.jezik === 'en';
-    const potpis = otvorene.length < 2 ? '' : [STANJE.jezik, n, otvorene.map(v => `${v.nedelja}:${v.kratko_sr}:${v.kratko_en}:${jeZavrsenaVezba(v) ? 'z' : 'o'}`).join(',')].join('|');
     document.querySelectorAll('[data-vezba-switch]').forEach(kutija => {
+      const uKompozitoru = Boolean(kutija.closest && kutija.closest('#modal-composer'));
+      const lista = uKompozitoru ? otvorene : sve;
+      const potpis = lista.length < 2 ? '' : [
+        STANJE.jezik, uKompozitoru ? 'k' : 'p', n,
+        lista.map(v => `${v.nedelja}:${v.kratko_sr}:${v.kratko_en}:${jeZavrsenaVezba(v) ? 'z' : 'o'}`).join(',')
+      ].join('|');
       kutija.hidden = !potpis;
       if (kutija.getAttribute('data-potpis') === potpis) return;
       kutija.setAttribute('data-potpis', potpis);
       kutija.innerHTML = !potpis ? '' :
         `<span class="vezba-cap">${esc(en ? 'Exercise' : 'Vežba')}</span>` +
-        `<div class="seg-group" role="group" aria-label="${esc(en ? 'Choose exercise' : 'Izbor vežbe')}">${otvorene.map(v => jeZavrsenaVezba(v)
-          ? `<button type="button" class="seg-btn zavrsena" disabled aria-disabled="true" title="${esc(nazivVezbe(v) + (en ? ' · ended' : ' · završena'))}">${esc(nazivVezbe(v, true))}</button>`
-          : `<button type="button" class="seg-btn${Number(v.nedelja) === n ? ' active' : ''}" data-vezba="${Number(v.nedelja)}" aria-pressed="${Number(v.nedelja) === n}" title="${esc(nazivVezbe(v))}">${esc(nazivVezbe(v, true))}</button>`
-        ).join('')}</div>`;
+        `<div class="seg-group" role="group" aria-label="${esc(en ? 'Choose exercise' : 'Izbor vežbe')}">${lista.map(v => {
+          const zav = jeZavrsenaVezba(v);
+          const akt = Number(v.nedelja) === n;
+          const naslov = nazivVezbe(v) + (zav ? (en ? ' · ended (view only)' : ' · završena (samo pregled)') : '');
+          return `<button type="button" class="seg-btn${zav ? ' zavrsena' : ''}${akt ? ' active' : ''}" data-vezba="${Number(v.nedelja)}" aria-pressed="${akt}" title="${esc(naslov)}">${esc(nazivVezbe(v, true))}</button>`;
+        }).join('')}</div>`;
     });
+  }
+
+  function osveziDugmeNovogZapisa() {
+    const zatvorena = jeAktivnaVezbaZatvorena();
+    const btn = document.getElementById('btn-open-composer');
+    if (btn) btn.hidden = zatvorena;
+    const cip = document.getElementById('readonly-chip');
+    if (cip) cip.hidden = !zatvorena;
   }
 
   // Slojevi zapisa izabrane vežbe (dugmad u prozoru za unos; ista dugmad čita i uređivanje zapisa u Dnevniku).
@@ -446,6 +489,7 @@
   let potpisTekstovaVezbe = '';
   function primeniTekstoveVezbe() {
     crtajBiracVezbe();
+    osveziDugmeNovogZapisa();
     const n = aktivnaNedelja();
     postaviDvojezicno(document.getElementById('rank-title'), `Napredak, timovi i članovi · Zadatak ${n}`, `Progress, teams and members · Task ${n}`);
     const saSnimanjem = vezbaSaUputstvomSnimanja();
@@ -456,7 +500,10 @@
     if (potpis === potpisTekstovaVezbe) return;
     potpisTekstovaVezbe = potpis;
     const el = id => document.getElementById(id);
-    postaviDvojezicno(el('vezba-naslov-dnevnik'), 'Urbani žurnal · ' + v.naziv_sr, 'Urban Journal · ' + v.naziv_en);
+    const zav = jeZavrsenaVezba(v);
+    postaviDvojezicno(el('vezba-naslov-dnevnik'),
+      'Urbani žurnal · ' + v.naziv_sr + (zav ? ' (završena)' : ''),
+      'Urban Journal · ' + v.naziv_en + (zav ? ' (ended)' : ''));
     postaviDvojezicno(el('vezba-uvod-dnevnik'),
       v.uputstvo_sr + ' Zapažanja svih članova tima i svih timova spajaju se ovde u živu mapu Beograda.',
       v.uputstvo_en + ' Entries from all team members merge here into a shared map of Belgrade.');
@@ -571,10 +618,20 @@
 
   function izaberiVezbu(n) {
     const broj = Number(n) || 0;
-    if (!broj || !otvoreneVezbe().some(v => Number(v.nedelja) === broj)) return;
+    if (!broj) return;
+    const jeOtvorena = otvoreneVezbe().some(v => Number(v.nedelja) === broj);
+    const uBiracu = jeOtvorena || vezbeUBiracu().some(v => Number(v.nedelja) === broj);
+    if (!uBiracu) return;
+    // U otvorenom prozoru za unos ne može se preći na završenu vežbu.
+    if (!jeOtvorena && kompozitorOtvoren()) return;
     const promena = broj !== aktivnaNedelja();
-    STANJE.izabranaVezba = broj;
-    try { localStorage.setItem(LS_VEZBA, String(broj)); } catch {}
+    if (jeOtvorena) {
+      STANJE.pregledVezbe = 0;
+      STANJE.izabranaVezba = broj;
+      try { localStorage.setItem(LS_VEZBA, String(broj)); } catch {}
+    } else {
+      STANJE.pregledVezbe = broj;
+    }
     if (promena) {
       // Slojevi su različiti po vežbi; izabrani slojevi stare vežbe ne prelaze u novu.
       STANJE.kompozitorTagovi.clear();
@@ -584,7 +641,7 @@
     primeniTekstoveVezbe();
     azurirajKompozitorMeta();
     crtajPodatke(true);
-    if (trebaPotvrdaSnimanja(broj)) otvoriPanelVezbe(broj, kompozitorOtvoren() ? 'kompozitor-nastavi' : '');
+    if (jeOtvorena && trebaPotvrdaSnimanja(broj)) otvoriPanelVezbe(broj, kompozitorOtvoren() ? 'kompozitor-nastavi' : '');
   }
 
   // --- Brojač dana: u koliko različitih dana (po beogradskom vremenu) su zapisi nastali. Prikaz, nije uslov zadatka. ---
@@ -1983,6 +2040,10 @@
   }
 
   function otvoriKompozitor() {
+    if (jeAktivnaVezbaZatvorena()) {
+      toast(t(otvoreneVezbe().length ? 'vezbaSamoPregled' : 'nemaOtvoreneVezbe'));
+      return;
+    }
     if (STANJE.obaveznoOsvezavanje) {
       osveziBanerVerzije();
       toast(t('potrebnoOsvezavanje'));
@@ -2099,6 +2160,11 @@
     const errEl = document.getElementById('comp-error');
     const btn = document.getElementById('btn-save-entry');
     errEl.hidden = true;
+    if (jeAktivnaVezbaZatvorena()) {
+      errEl.textContent = t(otvoreneVezbe().length ? 'vezbaSamoPregled' : 'nemaOtvoreneVezbe');
+      errEl.hidden = false;
+      return;
+    }
 
     // Slika iz galerije sa upisanom lokacijom određuje mesto zapisa; tada GPS telefona nije uslov.
     const gpsSlike = gpsIzPrilogaKompozitora();
@@ -2905,6 +2971,8 @@
     const u = new URL(location.href);
     u.hash = '';
     u.searchParams.set('dnevnik', clan ? `${tim}.${clan}` : tim);
+    if (STANJE.poVezbi) u.searchParams.set('vezba', String(aktivnaNedelja()));
+    else u.searchParams.delete('vezba');
     return u.toString();
   }
 
@@ -3019,9 +3087,12 @@
     }, 80);
   }
 
-  // Link oblika ?dnevnik=T53 ili ?dnevnik=T53.12 otvara odmah dnevnik tima ili člana.
+  // Link oblika ?dnevnik=T53 ili ?dnevnik=T53.12 otvara odmah dnevnik tima ili člana; ?vezba=N bira vežbu za pregled.
   function primeniFilterIzAdrese() {
-    const sirovo = String(new URLSearchParams(location.search).get('dnevnik') || '').trim();
+    const params = new URLSearchParams(location.search);
+    const vezbaParam = Number(params.get('vezba')) || 0;
+    if (vezbaParam >= 1 && vezbaParam <= 99) STANJE.pregledVezbe = vezbaParam;
+    const sirovo = String(params.get('dnevnik') || '').trim();
     const m = /^([A-Za-z0-9_-]{1,12})(?:\.(\d{1,9}))?$/.exec(sirovo);
     if (!m) return;
     STANJE.filterTim = m[1];
@@ -3320,7 +3391,7 @@
 
   function napraviPotpisPrikaza(zapisi, m2) {
     const limit = Math.min(zapisi.length, STANJE.dnevnikPrikazano);
-    const delovi = [`${STANJE.jezik}|${STANJE.filterTim}|${STANJE.filterClan}|${STANJE.apiBaza || ''}|${m2}|${zapisi.length}|${limit}`];
+    const delovi = [`${STANJE.jezik}|${aktivnaNedelja()}|${jeAktivnaVezbaZatvorena() ? 1 : 0}|${STANJE.filterTim}|${STANJE.filterClan}|${STANJE.apiBaza || ''}|${m2}|${zapisi.length}|${limit}`];
     for (let i = 0; i < limit; i++) {
       const z = zapisi[i];
       const pr = (z.prilozi || []).map(p => `${p.id || 'L'}:${p.vrsta}:${p.obrada_status || ''}:${p.url || ''}`).join(',');
@@ -3393,8 +3464,9 @@
     }
 
     // Hronološki feed u Dnevniku (straničeno po 30 zapisa radi trenutnog odziva bez zagušenja mreže)
+    const zatvorenaVezba = jeAktivnaVezbaZatvorena();
     if (zapisi.length === 0) {
-      feed.innerHTML = `<div class="entry-card"><p class="entry-text" style="color:var(--ink-soft)">${esc(t('nemaZapisa'))}</p></div>`;
+      feed.innerHTML = `<div class="entry-card"><p class="entry-text" style="color:var(--ink-soft)">${esc(t(zatvorenaVezba ? 'nemaZapisaPregled' : 'nemaZapisa'))}</p></div>`;
     } else {
       const zaPrikaz = zapisi.slice(0, STANJE.dnevnikPrikazano);
       const preostalo = Math.max(0, zapisi.length - zaPrikaz.length);
@@ -3412,7 +3484,7 @@
              <button type="button" class="link-btn" data-copy-uuid="${esc(z.uuid_klijenta)}">${esc(t('sacuvajKopiju'))}</button>` : ''}
              <button type="button" class="link-btn danger" data-drop-uuid="${esc(z.uuid_klijenta)}">${esc(t('otkaziRed'))}</button>`
           : (jeMojServerZapis(z)
-              ? `<button type="button" class="link-btn" data-edit-id="${esc(z.id)}">${esc(t('urediMoj'))}</button>
+              ? `${zatvorenaVezba ? '' : `<button type="button" class="link-btn" data-edit-id="${esc(z.id)}">${esc(t('urediMoj'))}</button>`}
                  <button type="button" class="link-btn danger" data-del-id="${esc(z.id)}">${esc(t('obrisiMoj'))}</button>`
               : '');
         return `
@@ -3609,7 +3681,7 @@
         <span>GPS ${Number(z.lat).toFixed(5)}, ${Number(z.lon).toFixed(5)} (±${Math.round(z.tacnost_m || 12)} m)</span> ·
         ${htmlNivoa(z)}
       </div>
-      ${jeMojServerZapis(z) && nivoZapisa(z) < 3 ? `<div class="edit-hint">${esc(t('zaNivo3Uredi', staFaliZaNivo3(z.tekst, z.kategorije, z.prilozi)))}</div>` : ''}
+      ${jeMojServerZapis(z) && !jeAktivnaVezbaZatvorena() && nivoZapisa(z) < 3 ? `<div class="edit-hint">${esc(t('zaNivo3Uredi', staFaliZaNivo3(z.tekst, z.kategorije, z.prilozi)))}</div>` : ''}
       ${z.uTelefonu ? `<div class="alert-box ${z.trajna_greska ? 'err' : 'warn'}">${esc(z.trajna_greska || t('uTelefonuOznaka'))}</div>` : ''}
       ${tagHtml}
       ${z.tekst ? `<p class="entry-text">${esc(z.tekst)}</p>` : ''}
