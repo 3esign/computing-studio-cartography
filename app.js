@@ -4,7 +4,7 @@
 
   // Oznaka izdanja aplikacije: ide uz svako slanje zapisa (?v=), da se u tragu servera vidi koji kod telefon vrti.
   // Ne menja se ručno: upisuje je `node tools/studenti.cjs --zakljucaj` (izvor je tools/studentski-otisak.json).
-  const VERZIJA_APP = '2026-11-28.1';
+  const VERZIJA_APP = '2026-11-28.2';
   const SS_AUTO_RELOAD_V = 'uz_auto_reload_v1';
   const BEOGRAD_CENTAR = [20.4612, 44.8154];
   const LS_SESIJA = 'uz_sesija_v1';
@@ -174,6 +174,18 @@
       sacuvajKopiju: 'Sačuvaj kopiju',
       urediMoj: 'Uredi',
       obrisiMoj: 'Obriši',
+      samoPregled: 'Samo pregled',
+      ispravkaDozvoljena: 'Ispravka dozvoljena',
+      ispravkaBaner: doTxt => `Profesor ti je omogućio ispravku zapisa u ovoj vežbi (do ${doTxt}): dodirni „Uredi“ na svom zapisu da obrišeš ili zameniš pojedinačnu sliku/prilog ili izmeniš tekst, ili „Obriši“ za ceo zapis.`,
+      priloziUredjivanje: 'Prilozi u ovom zapisu (obriši pojedinačni ili zameni):',
+      zameniPrilog: 'Zameni',
+      menjamPrilog: 'Menjam…',
+      prilogZamenjen: 'Prilog je zamenjen.',
+      prilogObrisan: 'Prilog je obrisan.',
+      potvrdaObrisiPrilog: 'Obrisati samo ovaj prilog iz zapisa? Ostali prilozi ostaju sačuvani.',
+      poslednjiPrilogNapomena: 'Jedini prilog u zapisu bez teksta — upotrebi „Zameni“ ili obriši ceo zapis.',
+      otkazi: 'Otkaži',
+      sacuvaj: 'Sačuvaj',
       videoObrada: '🎬 Video se optimizuje za sve uređaje…',
       prikaziNaMapi: 'Prikaži na mapi →',
       qrPrepoznat: (tim, sl, lim) => `QR kod prepoznat: Tim ${tim} (${sl}/${lim} zauzetih mesta). Upiši ime ili nadimak i uđi u žurnal.`,
@@ -240,6 +252,18 @@
       sacuvajKopiju: 'Save a copy',
       urediMoj: 'Edit',
       obrisiMoj: 'Delete',
+      samoPregled: 'View only',
+      ispravkaDozvoljena: 'Edits allowed',
+      ispravkaBaner: doTxt => `Your teacher enabled entry corrections for this exercise (until ${doTxt}): tap “Edit” on your entry to delete or replace an individual photo/attachment or edit text, or “Delete” for the whole entry.`,
+      priloziUredjivanje: 'Attachments in this entry (delete one or replace it):',
+      zameniPrilog: 'Replace',
+      menjamPrilog: 'Replacing…',
+      prilogZamenjen: 'Attachment replaced.',
+      prilogObrisan: 'Attachment deleted.',
+      potvrdaObrisiPrilog: 'Delete only this attachment from the entry? Other attachments will stay.',
+      poslednjiPrilogNapomena: 'Only attachment in an entry without text — use “Replace” or delete the whole entry.',
+      otkazi: 'Cancel',
+      sacuvaj: 'Save',
       videoObrada: '🎬 Optimizing video for all devices…',
       prikaziNaMapi: 'Show on map →',
       qrPrepoznat: (tim, sl, lim) => `QR verified: Team ${tim} (${sl}/${lim} seats used). Enter your name or nickname to start.`,
@@ -362,6 +386,22 @@
     return (STANJE.teme || []).length > 0 && otvoreneVezbe().length === 0;
   }
 
+  // Namenska dozvola profesora za naknadnu ispravku pojedinačnog studenta (stiže samo u /api/ja, nikad u javnom /api/stanje).
+  function aktivnaDozvolaIspravke(sadaMs = Date.now()) {
+    const d = STANJE.sesija && STANJE.sesija.dozvola_ispravke;
+    if (!d || !d.do) return null;
+    const ms = Date.parse(d.do);
+    if (!Number.isFinite(ms) || ms <= sadaMs) return null;
+    return { nedelja: Math.max(0, Number(d.nedelja) || 0), do: d.do };
+  }
+
+  function imaDozvoluIspravkeZa(nedelja = aktivnaNedelja(), sadaMs = Date.now()) {
+    const d = aktivnaDozvolaIspravke(sadaMs);
+    if (!d) return false;
+    const n = Number(nedelja) || 0;
+    return d.nedelja === 0 || n === 0 || d.nedelja === n;
+  }
+
   function nazivVezbe(v, kratak) {
     const en = STANJE.jezik === 'en';
     if (!v) return (en ? 'Exercise ' : 'Vežba ') + aktivnaNedelja();
@@ -467,7 +507,12 @@
     const btn = document.getElementById('btn-open-composer');
     if (btn) btn.hidden = zatvorena;
     const cip = document.getElementById('readonly-chip');
-    if (cip) cip.hidden = !zatvorena;
+    if (cip) {
+      cip.hidden = !zatvorena;
+      const dozvola = zatvorena && imaDozvoluIspravkeZa();
+      cip.classList.toggle('allow-edit', dozvola);
+      cip.textContent = dozvola ? t('ispravkaDozvoljena') : t('samoPregled');
+    }
   }
 
   // Slojevi zapisa izabrane vežbe (dugmad u prozoru za unos; ista dugmad čita i uređivanje zapisa u Dnevniku).
@@ -2824,6 +2869,209 @@
     }
   }
 
+  async function obrisiPrilogZapisa(zapisId, prilogId) {
+    if (!window.confirm(t('potvrdaObrisiPrilog'))) return false;
+    try {
+      const r = await apiPoziv(`/api/zapisi/${encodeURIComponent(zapisId)}/prilozi/${encodeURIComponent(prilogId)}`, { method: 'DELETE' });
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        toast((j && j.poruka) || 'Brisanje priloga nije uspelo.');
+        return false;
+      }
+      await ucitajStanjeSaServera(false);
+      toast(t('prilogObrisan'));
+      return true;
+    } catch {
+      toast('Server trenutno nije dostupan — pokušaj ponovo.');
+      return false;
+    }
+  }
+
+  async function zameniPrilogZapisa(zapisId, prilogId, fajl) {
+    if (!fajl) return false;
+    const jesteSlika = (fajl.type || '').startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|avif|bmp|tiff?|gif)$/i.test(fajl.name || '');
+    const jesteZvuk = (fajl.type || '').startsWith('audio/') || /\.(mp3|m4a|ogg|opus|wav|aac|qta|caf|flac|amr|m4b)$/i.test(fajl.name || '');
+    let zaSlanje = fajl;
+    let ime = fajl.name || (jesteSlika ? 'slika.jpg' : (jesteZvuk ? 'zvuk.m4a' : 'video.mp4'));
+    let sirina = 0;
+    let visina = 0;
+    if (jesteSlika) {
+      try {
+        const opt = await optimizujSliku(fajl);
+        zaSlanje = opt.blob;
+        ime = opt.ime || ime;
+        sirina = opt.sirina || 0;
+        visina = opt.visina || 0;
+      } catch (err) {
+        if (fajl.size > 15 * 1024 * 1024) {
+          toast((err && err.message) || 'Slika prelazi 15 MB.');
+          return false;
+        }
+      }
+    } else if (fajl.size > 90 * 1024 * 1024) {
+      toast('Fajl prelazi 90 MB. Snimi kraći video (do 60 sekundi).');
+      return false;
+    } else if (jesteZvuk && !(fajl.type || '').startsWith('audio/')) {
+      zaSlanje = new File([fajl], ime, { type: 'audio/mp4', lastModified: fajl.lastModified });
+    }
+    const fd = new FormData();
+    fd.append('prilog_0', zaSlanje, ime);
+    if (sirina) fd.append('sirina_0', String(sirina));
+    if (visina) fd.append('visina_0', String(visina));
+    try {
+      const url = `/api/zapisi/${encodeURIComponent(zapisId)}/prilozi/${encodeURIComponent(prilogId)}/zameni?v=${encodeURIComponent(VERZIJA_APP)}&put=fd`;
+      const r = await apiPoziv(url, { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        toast((j && j.poruka) || 'Zamena priloga nije uspela.');
+        return false;
+      }
+      await ucitajStanjeSaServera(false);
+      toast(t('prilogZamenjen'));
+      return true;
+    } catch {
+      toast('Server trenutno nije dostupan — pokušaj ponovo.');
+      return false;
+    }
+  }
+
+  let poslednjaProveraJaMs = 0;
+  async function osveziMojProfil(tiho = true) {
+    if (!STANJE.sesija || !STANJE.sesija.tajna) return null;
+    if (tiho && Date.now() - poslednjaProveraJaMs < 20000) return null;
+    poslednjaProveraJaMs = Date.now();
+    try {
+      const r = await apiPoziv('/api/ja', { method: 'GET' });
+      const j = await r.json();
+      if (r.ok && j && j.ok && STANJE.sesija) {
+        const staraDoz = JSON.stringify(STANJE.sesija.dozvola_ispravke || null);
+        const novaDozObj = j.dozvola_ispravke || null;
+        const novaDoz = JSON.stringify(novaDozObj);
+        const stariUredjajId = Number(STANJE.sesija.uredjaj_id || 0);
+        const noviUredjajId = j.uredjaj_id || STANJE.sesija.uredjaj_id || 0;
+        sacuvajSesiju(Object.assign({}, STANJE.sesija, {
+          uredjaj_id: noviUredjajId,
+          nadimak: j.nadimak || STANJE.sesija.nadimak || '',
+          oznaka: j.oznaka || STANJE.sesija.oznaka || '',
+          zauzeto: j.zauzeto,
+          limit: j.limit,
+          dozvola_ispravke: novaDozObj
+        }));
+        if (staraDoz !== novaDoz || Number(noviUredjajId) !== stariUredjajId) {
+          osveziDugmeNovogZapisa();
+          crtajPodatke(true);
+        }
+        return j;
+      }
+      if (r.status === 401) {
+        sacuvajSesiju(null);
+        osveziDugmeNovogZapisa();
+        crtajPodatke(true);
+        if (!tiho) toast((j && j.poruka) || 'Mesto za ovaj uređaj je oslobođeno. Skeniraj ponovo QR kod tima.');
+        return { opozvan: true, poruka: j && j.poruka };
+      }
+    } catch {}
+    return null;
+  }
+
+  // Zajednički urednik sopstvenog zapisa (tekst, slojevi i — uz dozvolu profesora — brisanje/zamena svakog priloga).
+  function montirajEditorZapisa(holder, z, opcije = {}) {
+    if (!holder || !z) return;
+    const zid = Number(z.id);
+    const prilozi = Array.isArray(z.prilozi) ? z.prilozi : [];
+    const dozvolaPriloga = imaDozvoluIspravkeZa(z.nedelja);
+    const en = STANJE.jezik === 'en';
+    const bezTeksta = !String(z.tekst || '').trim();
+    const priloziHtml = dozvolaPriloga && prilozi.length ? `
+      <div class="edit-media-sec">
+        <div class="edit-media-title">${esc(t('priloziUredjivanje'))}</div>
+        <div class="edit-media-list">${prilozi.map((p, idx) => {
+          const pun = punUrlMedija(p.url);
+          const thumb = p.vrsta === 'foto'
+            ? `<a href="${esc(pun)}" target="_blank" rel="noopener"><img src="${esc(urlSliciceMedija(pun))}" alt=""></a>`
+            : `<span class="edit-media-ico" aria-hidden="true">${p.vrsta === 'zvuk' ? '🎵' : '🎬'}</span>`;
+          const nazivVrste = p.vrsta === 'foto' ? (en ? 'Photo' : 'Slika') : (p.vrsta === 'zvuk' ? (en ? 'Sound' : 'Zvuk') : 'Video');
+          const jediniBezTeksta = prilozi.length <= 1 && bezTeksta;
+          return `
+            <div class="edit-media-row" data-edit-prilog-row="${Number(p.id)}">
+              ${thumb}
+              <div class="edit-media-info">
+                <strong>${esc(nazivVrste)} ${idx + 1}/${prilozi.length}</strong>
+                ${jediniBezTeksta ? `<span class="edit-media-note">${esc(t('poslednjiPrilogNapomena'))}</span>` : ''}
+              </div>
+              <div class="edit-media-btns">
+                <button type="button" class="link-btn" data-replace-pid="${Number(p.id)}">${esc(t('zameniPrilog'))}</button>
+                <input type="file" accept="image/*,video/*,audio/*" data-replace-inp="${Number(p.id)}" hidden>
+                ${jediniBezTeksta ? '' : `<button type="button" class="link-btn danger" data-del-pid="${Number(p.id)}">${esc(t('obrisiMoj'))}</button>`}
+              </div>
+            </div>`;
+        }).join('')}</div>
+      </div>` : '';
+
+    holder.hidden = false;
+    holder.innerHTML = `
+      <div class="inline-edit-box">
+        ${priloziHtml}
+        <textarea class="textarea" rows="3" maxlength="2000">${esc(z.tekst || '')}</textarea>
+        <div class="chip-grid">${htmlCipoviSloja(z.kategorije)}</div>
+        <div class="edit-hint" data-edit-hint></div>
+        <div style="display:flex;gap:6px;justify-content:flex-end">
+          <button type="button" class="btn-secondary" data-cancel-ed style="padding:6px 12px;min-height:34px">${esc(t('otkazi'))}</button>
+          <button type="button" class="btn-primary" data-save-ed style="width:auto;padding:6px 14px;min-height:34px">${esc(t('sacuvaj'))}</button>
+        </div>
+      </div>
+    `;
+
+    const osveziSavet = () => {
+      const kat = holder.querySelectorAll('.choice-chip.selected');
+      const fali = staFaliZaNivo3(holder.querySelector('textarea').value, Array.from(kat), prilozi);
+      holder.querySelector('[data-edit-hint]').textContent = fali ? t('zaNivo3', fali) : t('nivo3Dostignut');
+    };
+    holder.querySelectorAll('[data-edit-tag]').forEach(c => {
+      c.onclick = () => { c.classList.toggle('selected'); osveziSavet(); };
+    });
+    holder.querySelector('textarea').addEventListener('input', osveziSavet);
+    osveziSavet();
+
+    holder.querySelectorAll('[data-del-pid]').forEach(b => {
+      b.onclick = async () => {
+        const pid = Number(b.getAttribute('data-del-pid'));
+        b.disabled = true;
+        const ok = await obrisiPrilogZapisa(zid, pid);
+        if (!ok) { b.disabled = false; return; }
+        if (typeof opcije.posleIzmene === 'function') opcije.posleIzmene(zid);
+      };
+    });
+    holder.querySelectorAll('[data-replace-pid]').forEach(b => {
+      const pid = Number(b.getAttribute('data-replace-pid'));
+      const inp = holder.querySelector(`[data-replace-inp="${pid}"]`);
+      if (!inp) return;
+      b.onclick = () => inp.click();
+      inp.onchange = async () => {
+        const f = inp.files && inp.files[0];
+        inp.value = '';
+        if (!f) return;
+        b.disabled = true;
+        b.textContent = t('menjamPrilog');
+        const ok = await zameniPrilogZapisa(zid, pid, f);
+        if (!ok) {
+          b.disabled = false;
+          b.textContent = t('zameniPrilog');
+          return;
+        }
+        if (typeof opcije.posleIzmene === 'function') opcije.posleIzmene(zid);
+      };
+    });
+
+    holder.querySelector('[data-cancel-ed]').onclick = () => { holder.hidden = true; holder.innerHTML = ''; };
+    holder.querySelector('[data-save-ed]').onclick = async () => {
+      const val = holder.querySelector('textarea').value.trim();
+      const kat = Array.from(holder.querySelectorAll('.choice-chip.selected')).map(c => c.getAttribute('data-edit-tag'));
+      const ok = await sacuvajIzmenuSopstvenogZapisa(zid, val, kat);
+      if (ok && typeof opcije.posleIzmene === 'function') opcije.posleIzmene(zid, true);
+    };
+  }
+
   // --- Učitavanje javnog stanja mape i dnevnika (ETag kratki spoj + zaštita od zastarelih paralelnih odgovora) ---
   let stanjeZahtevGen = 0;
   let poslednjiPrimenjenGen = 0;
@@ -3391,7 +3639,9 @@
 
   function napraviPotpisPrikaza(zapisi, m2) {
     const limit = Math.min(zapisi.length, STANJE.dnevnikPrikazano);
-    const delovi = [`${STANJE.jezik}|${aktivnaNedelja()}|${jeAktivnaVezbaZatvorena() ? 1 : 0}|${STANJE.filterTim}|${STANJE.filterClan}|${STANJE.apiBaza || ''}|${m2}|${zapisi.length}|${limit}`];
+    const doz = aktivnaDozvolaIspravke();
+    const dozPotpis = doz && imaDozvoluIspravkeZa() ? `${doz.nedelja}:${doz.do}` : '';
+    const delovi = [`${STANJE.jezik}|${aktivnaNedelja()}|${jeAktivnaVezbaZatvorena() ? 1 : 0}|${dozPotpis}|${STANJE.filterTim}|${STANJE.filterClan}|${STANJE.apiBaza || ''}|${m2}|${zapisi.length}|${limit}`];
     for (let i = 0; i < limit; i++) {
       const z = zapisi[i];
       const pr = (z.prilozi || []).map(p => `${p.id || 'L'}:${p.vrsta}:${p.obrada_status || ''}:${p.url || ''}`).join(',');
@@ -3465,8 +3715,13 @@
 
     // Hronološki feed u Dnevniku (straničeno po 30 zapisa radi trenutnog odziva bez zagušenja mreže)
     const zatvorenaVezba = jeAktivnaVezbaZatvorena();
+    const dozvolaObj = aktivnaDozvolaIspravke();
+    const dozvolaVezbe = Boolean(dozvolaObj && imaDozvoluIspravkeZa());
+    const banerDozvole = dozvolaVezbe
+      ? `<div class="alert-box ok allow-edit-banner">${esc(t('ispravkaBaner', formatVreme(dozvolaObj.do)))}</div>`
+      : '';
     if (zapisi.length === 0) {
-      feed.innerHTML = `<div class="entry-card"><p class="entry-text" style="color:var(--ink-soft)">${esc(t(zatvorenaVezba ? 'nemaZapisaPregled' : 'nemaZapisa'))}</p></div>`;
+      feed.innerHTML = banerDozvole + `<div class="entry-card"><p class="entry-text" style="color:var(--ink-soft)">${esc(t(zatvorenaVezba ? 'nemaZapisaPregled' : 'nemaZapisa'))}</p></div>`;
     } else {
       const zaPrikaz = zapisi.slice(0, STANJE.dnevnikPrikazano);
       const preostalo = Math.max(0, zapisi.length - zaPrikaz.length);
@@ -3479,12 +3734,13 @@
               ? `<div class="alert-box err" style="padding:6px 10px;font-size:12px">${esc(z.trajna_greska)}</div>`
               : `<div class="alert-box warn" style="padding:5px 9px;font-size:11.5px">${esc(t('uTelefonuOznaka'))}</div>`)
           : '';
+        const mozeUredi = !zatvorenaVezba || imaDozvoluIspravkeZa(z.nedelja);
         const akcijeReda = z.uTelefonu
           ? `${z.trajna_greska ? `<button type="button" class="link-btn" data-retry-uuid="${esc(z.uuid_klijenta)}">${esc(t('probajOpet'))}</button>
              <button type="button" class="link-btn" data-copy-uuid="${esc(z.uuid_klijenta)}">${esc(t('sacuvajKopiju'))}</button>` : ''}
              <button type="button" class="link-btn danger" data-drop-uuid="${esc(z.uuid_klijenta)}">${esc(t('otkaziRed'))}</button>`
           : (jeMojServerZapis(z)
-              ? `${zatvorenaVezba ? '' : `<button type="button" class="link-btn" data-edit-id="${esc(z.id)}">${esc(t('urediMoj'))}</button>`}
+              ? `${mozeUredi ? `<button type="button" class="link-btn" data-edit-id="${esc(z.id)}">${esc(t('urediMoj'))}</button>` : ''}
                  <button type="button" class="link-btn danger" data-del-id="${esc(z.id)}">${esc(t('obrisiMoj'))}</button>`
               : '');
         return `
@@ -3516,7 +3772,7 @@
         ? `<button type="button" class="load-more-btn" id="btn-load-more">${esc(t('josZapisa', preostalo))}</button>`
         : '';
 
-      feed.innerHTML = karticeHtml + viseHtml;
+      feed.innerHTML = banerDozvole + karticeHtml + viseHtml;
 
       // Mreža: dodir na pločicu (van dugmadi i polja za izmenu) otvara ceo zapis sa svim prilozima.
       feed.onclick = ev => {
@@ -3567,34 +3823,14 @@
           const holder = feed.querySelector(`[data-edit-holder="${CSS.escape(String(zid))}"]`);
           if (!z || !holder) return;
           if (!holder.hidden) { holder.hidden = true; holder.innerHTML = ''; return; }
-          holder.hidden = false;
-          holder.innerHTML = `
-            <div class="inline-edit-box">
-              <textarea class="textarea" rows="3" maxlength="2000">${esc(z.tekst || '')}</textarea>
-              <div class="chip-grid">${htmlCipoviSloja(z.kategorije)}</div>
-              <div class="edit-hint" data-edit-hint></div>
-              <div style="display:flex;gap:6px;justify-content:flex-end">
-                <button type="button" class="btn-secondary" data-cancel-ed style="padding:6px 12px;min-height:34px">Otkaži</button>
-                <button type="button" class="btn-primary" data-save-ed style="width:auto;padding:6px 14px;min-height:34px">Sačuvaj</button>
-              </div>
-            </div>
-          `;
-          const osveziSavet = () => {
-            const kat = holder.querySelectorAll('.choice-chip.selected');
-            const fali = staFaliZaNivo3(holder.querySelector('textarea').value, Array.from(kat), z.prilozi);
-            holder.querySelector('[data-edit-hint]').textContent = fali ? t('zaNivo3', fali) : t('nivo3Dostignut');
-          };
-          holder.querySelectorAll('[data-edit-tag]').forEach(c => {
-            c.onclick = () => { c.classList.toggle('selected'); osveziSavet(); };
+          montirajEditorZapisa(holder, z, {
+            posleIzmene(id, zatvori) {
+              if (zatvori) return;
+              const svez = sviVidljiviZapisi().find(x => Number(x.id) === id);
+              const noviHolder = feed.querySelector(`[data-edit-holder="${CSS.escape(String(id))}"]`);
+              if (svez && noviHolder) montirajEditorZapisa(noviHolder, svez, { posleIzmene: this.posleIzmene });
+            }
           });
-          holder.querySelector('textarea').addEventListener('input', osveziSavet);
-          osveziSavet();
-          holder.querySelector('[data-cancel-ed]').onclick = () => { holder.hidden = true; holder.innerHTML = ''; };
-          holder.querySelector('[data-save-ed]').onclick = async () => {
-            const val = holder.querySelector('textarea').value.trim();
-            const kat = Array.from(holder.querySelectorAll('.choice-chip.selected')).map(c => c.getAttribute('data-edit-tag'));
-            await sacuvajIzmenuSopstvenogZapisa(zid, val, kat);
-          };
         };
       });
 
@@ -3662,6 +3898,7 @@
     const tagHtml = (z.kategorije || []).length
       ? `<div class="tag-row">${z.kategorije.map(k => `<span class="tag-pill">${esc(k)}</span>`).join('')}</div>`
       : '';
+    const mozeUrediDetalj = jeMojServerZapis(z) && (!jeAktivnaVezbaZatvorena() || imaDozvoluIspravkeZa(z.nedelja));
     const sopstveneAkcijeHtml = z.uTelefonu
       ? `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:6px">
            ${z.trajna_greska ? `<button type="button" class="link-btn" id="det-retry-q">${esc(t('probajOpet'))}</button>
@@ -3670,8 +3907,10 @@
          </div>`
       : (jeMojServerZapis(z)
           ? `<div style="display:flex;gap:10px;justify-content:flex-end;padding-top:6px">
+               ${mozeUrediDetalj ? `<button type="button" class="link-btn" id="det-edit-own">${esc(t('urediMoj'))}</button>` : ''}
                <button type="button" class="link-btn danger" id="det-del-own">${esc(t('obrisiMoj'))}</button>
-             </div>`
+             </div>
+             <div class="inline-edit-holder" id="det-edit-holder" hidden></div>`
           : '');
     const teloEl = document.getElementById('detail-body');
     teloEl.innerHTML = `
@@ -3681,7 +3920,7 @@
         <span>GPS ${Number(z.lat).toFixed(5)}, ${Number(z.lon).toFixed(5)} (±${Math.round(z.tacnost_m || 12)} m)</span> ·
         ${htmlNivoa(z)}
       </div>
-      ${jeMojServerZapis(z) && !jeAktivnaVezbaZatvorena() && nivoZapisa(z) < 3 ? `<div class="edit-hint">${esc(t('zaNivo3Uredi', staFaliZaNivo3(z.tekst, z.kategorije, z.prilozi)))}</div>` : ''}
+      ${mozeUrediDetalj && nivoZapisa(z) < 3 ? `<div class="edit-hint">${esc(t('zaNivo3Uredi', staFaliZaNivo3(z.tekst, z.kategorije, z.prilozi)))}</div>` : ''}
       ${z.uTelefonu ? `<div class="alert-box ${z.trajna_greska ? 'err' : 'warn'}">${esc(z.trajna_greska || t('uTelefonuOznaka'))}</div>` : ''}
       ${tagHtml}
       ${z.tekst ? `<p class="entry-text">${esc(z.tekst)}</p>` : ''}
@@ -3697,6 +3936,21 @@
     if (btnCopyQ) btnCopyQ.onclick = () => sacuvajKopijuZapisa(z.uuid_klijenta);
     const btnRetryQ = document.getElementById('det-retry-q');
     if (btnRetryQ) btnRetryQ.onclick = () => { zatvoriSvePanele(); sinhronizujRed(true); };
+    const btnEditOwn = document.getElementById('det-edit-own');
+    if (btnEditOwn) {
+      btnEditOwn.onclick = () => {
+        const holder = document.getElementById('det-edit-holder');
+        if (!holder) return;
+        if (!holder.hidden) { holder.hidden = true; holder.innerHTML = ''; return; }
+        montirajEditorZapisa(holder, z, {
+          posleIzmene(id) {
+            const svez = sviVidljiviZapisi().find(x => Number(x.id) === id);
+            if (svez) otvoriDetaljZapisa([svez], 0);
+            else zatvoriSvePanele();
+          }
+        });
+      };
+    }
     const btnDelOwn = document.getElementById('det-del-own');
     if (btnDelOwn) btnDelOwn.onclick = () => obrisiSopstveniZapis(Number(z.id));
     otvoriPanel('modal-detail');
@@ -4198,22 +4452,12 @@
         qb.hidden = true;
       }
       otvoriPanel('modal-profile');
-      try {
-        const r = await apiPoziv('/api/ja', { method: 'GET' });
-        const j = await r.json();
-        if (r.ok && j && j.ok && STANJE.sesija) {
-          STANJE.sesija.uredjaj_id = j.uredjaj_id || STANJE.sesija.uredjaj_id || 0;
-          STANJE.sesija.zauzeto = j.zauzeto;
-          STANJE.sesija.limit = j.limit;
-          STANJE.sesija.oznaka = j.oznaka || STANJE.sesija.oznaka;
-          sacuvajSesiju(STANJE.sesija);
-          ispisiRezime();
-        } else if (r.status === 401) {
-          sacuvajSesiju(null);
-          zatvoriSvePanele();
-          toast((j && j.poruka) || 'Mesto za ovaj uređaj je oslobođeno. Skeniraj ponovo QR kod tima.');
-        }
-      } catch {}
+      const rezJa = await osveziMojProfil(false);
+      if (rezJa && rezJa.opozvan) {
+        zatvoriSvePanele();
+      } else if (rezJa && STANJE.sesija) {
+        ispisiRezime();
+      }
     };
 
     document.getElementById('btn-save-profile').onclick = async () => {
@@ -4579,6 +4823,7 @@
         if (pokusajAutomatskoOsvezavanje()) return;
         sinhronizujRed();
         ucitajStanjeSaServera();
+        osveziMojProfil(true);
       }
     });
   }
@@ -4654,20 +4899,25 @@
       } else {
         try {
           const stariUredjajId = Number(STANJE.sesija.uredjaj_id || 0);
+          const staraDoz = JSON.stringify(STANJE.sesija.dozvola_ispravke || null);
           const r = await apiPoziv('/api/ja', { method: 'GET' });
           const j = await r.json();
           if (r.ok && j.ok) {
+            poslednjaProveraJaMs = Date.now();
             sessionStorage.removeItem(SS_PENDING_QR);
             STANJE.pendingQr = null;
             const noviUredjajId = j.uredjaj_id || STANJE.sesija.uredjaj_id || 0;
-            if (Number(noviUredjajId) !== stariUredjajId) sesijaPromenjena = true;
+            const novaDozObj = j.dozvola_ispravke || null;
+            if (Number(noviUredjajId) !== stariUredjajId || JSON.stringify(novaDozObj) !== staraDoz) sesijaPromenjena = true;
             sacuvajSesiju(Object.assign({}, STANJE.sesija, {
               uredjaj_id: noviUredjajId,
               nadimak: j.nadimak || STANJE.sesija.nadimak || '',
               oznaka: j.oznaka || STANJE.sesija.oznaka || '',
               zauzeto: j.zauzeto,
-              limit: j.limit
+              limit: j.limit,
+              dozvola_ispravke: novaDozObj
             }));
+            osveziDugmeNovogZapisa();
             if (prenetaPrijava) {
               toast(`${j.tim} · ${j.nadimak || j.oznaka} (isto mesto preneto)`);
             }
